@@ -623,7 +623,10 @@ class VisualGNG (private var df: DataFrame) {
         .setData(n.prototype.toArray.mkString("[", ",", "]"))
 
       n.label match {
-        case Some(l) => gn.setGroup(n.label.get).setHint(hint + s" | label: ${this.indexedLabels(l)}")
+        case Some(l) =>
+          gn.setGroup(l)
+          if (this.indexedLabels.isEmpty) gn.setHint(hint + s" | label: $l")
+          else gn.setHint(hint + s" | label: ${this.indexedLabels(l)}")
         case None => gn.setHint(hint)
       }
 
@@ -710,7 +713,7 @@ class VisualGNG (private var df: DataFrame) {
   /**
     * Computes a full count of data points per unit and updates the graph.
     * */
-  def computeDensity(): VisualGNG = {
+  def computeDensity(): this.type = {
     val counts = getPredictions()
       .groupBy(model.getPredictionCol)
       .count()

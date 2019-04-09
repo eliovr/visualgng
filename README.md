@@ -2,6 +2,8 @@
 An updated implementation of the Visual Growing Neural Gas for exploratory data analysis, as describe in  [Ventocilla et al., 2019](https://www.scitepress.org/PublicationsDetail.aspx?ID=la6GQgbV48M=&t=1).
 The library also provides a plain implementation of the Growing Neural Gas ([Fritzke, 1995](http://papers.nips.cc/paper/893-a-growing-neural-gas-network-learns-topologies.pdf)).
 
+NOTE: Both GNG and VisualGNG put some burden on the driver.
+
 ## Author
 - Elio Ventocilla 
  
@@ -37,7 +39,8 @@ mvn package
 ## Usage
 To deploy it in Zeppelin, go to the Spark interpreter settings and add a new dependency artifact with the path to the generated jar file (e.g. /path/to/visualgng/target/visualgng-1.0-SNAPSHOT.jar)
 Once the dependency is added, it should be possible to import the needed packages from a notebook.
-Example using the [Iris dataset](https://archive.ics.uci.edu/ml/datasets/Iris) from the UCI repository:
+
+An example using the [Iris dataset](https://archive.ics.uci.edu/ml/datasets/Iris) from the UCI repository:
 
 
 ```scala
@@ -68,7 +71,7 @@ By default, VisualGNG assumes that all columns in the dataset will be used in tr
 The instantiated VisualGNG object can be used in other paragraphs for different purposes. Following the previous example with the `gng` object:
 
 - `gng.parallelCoodinates()`: will display a parallel coordinates plot representing the units in the GNG model. This plot dynamically updates along with the GNG's force-directed graph.
-- `gng.kmeans`: takes an integer and returns a `KMeansModel`. Will run K-means on the trained units' prototypes and visually encode the result in the force-directed graph.
+- `gng.kmeans`: takes a number for k as an integer and returns a `KMeansModel`. Will run K-means on the trained units' prototypes and visually encode the result in the force-directed graph.
 - `gng.computeDensity()`: will compute the true density and update the nodes in the graph accordingly.
 - `gng.model`: returns the `GNGModel` instance. This can be used as a transformer (in the SparkML sense) on new data.
 - `gng.getPredictions`: takes a boolean (optional, default = false) and returns a `DataFrame`. It will apply the original data to the trained model and assign units' ids to each data point. If the true is given, then it will also provide the Euclidean distance to the corresponding unit.
