@@ -62,8 +62,8 @@ By default, VisualGNG assumes that all columns in the dataset will be used in tr
 
 ### Parameters
 - `setInputCols`: takes an `Array[String]`. It defines which columns to be used in training.
-- `setLabelCol`: takes a string. It tells the library that to treat the given column as a label. This means that the column is ignored during training, but the units will assume the color of the latest win. This column can be of type Int, Double or String.
-- `setIdCol`: taked a string. Similar to `setLabelCol` but it won't be visually encoded. If `setInputCols` is not given, then all other columns will be used for training. This column can be of any type.
+- `setLabelCol`: takes a string. It tells the library that to treat the given column as a label. This means that the column is ignored during training, and the units will assume the color of the latest win. This column can be of type Int, Double or String.
+- `setIdCol`: takes a string. Similar to `setLabelCol` but it won't be visually encoded. If `setInputCols` is not given, then all other columns will be used for training. This column can be of any type.
 - `setScale`: takes a boolean. It defines whether the training features should be scaled to a unit standard deviation or not.
 
 
