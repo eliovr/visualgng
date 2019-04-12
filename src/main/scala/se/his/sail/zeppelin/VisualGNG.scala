@@ -556,7 +556,9 @@ class VisualGNG (private var df: DataFrame) {
 
       while (this.isTraining) {
 
-        this.model = gng.fit(this.rdd, this.model, this.updateEvery)
+        this.model = gng
+          .setSeed(this.iterationCounter)
+          .fit(this.rdd, this.model, this.updateEvery)
 
         this.iterationCounter += this.updateEvery
         updateStats()
@@ -572,7 +574,7 @@ class VisualGNG (private var df: DataFrame) {
     } catch {
 
       case e: Throwable =>
-        statusText.set("This was... unexpected: " + e.getMessage)
+        statusText.set("This was unexpected: " + e.getMessage)
         logger.error("VisualGNG ERROR: ", e)
 
     }

@@ -24,6 +24,8 @@ class GNG private (
 
   private var labelCol: Option[String] = None
 
+  private var seed: Long = 20
+
   /**
     * Maximum number of iterations.
     * */
@@ -113,6 +115,11 @@ class GNG private (
     this
   }
 
+  def setSeed(s: Long): this.type = {
+    this.seed = s
+    this
+  }
+
   // ------------ Optimization parameters / controls ---------
 
   def fit(df: Dataset[_], iterations: Int): GNGModel = {
@@ -150,7 +157,7 @@ class GNG private (
     while (iterationCounter < iterations) {
       if (signalIterator.isEmpty || !signalIterator.hasNext)
         signalIterator = rdd
-          .takeSample(withReplacement = true, this.lambda)
+          .takeSample(withReplacement = true, this.lambda, this.seed + iterationCounter)
           .iterator
 
       /**
