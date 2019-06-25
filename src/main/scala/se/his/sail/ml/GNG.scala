@@ -24,6 +24,8 @@ class GNG private (
 
   private var labelCol: Option[String] = None
 
+  private var seed: Long = 20
+
   /**
     * Maximum number of iterations.
     * */
@@ -110,6 +112,11 @@ class GNG private (
 
   def setLabelCol(col: String): this.type = {
     this.labelCol = Some(col)
+    this
+  }
+
+  def setSeed(s: Long): this.type = {
+    this.seed = s
     this
   }
 
