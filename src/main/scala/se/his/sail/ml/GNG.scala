@@ -141,161 +141,167 @@ class GNG private (
 
   def fit(df: Dataset[_]): GNGModel = this.fit(df, this.maxIterations)
 
-  def fit(rdd: RDD[Instance], model: GNGModel, iterations: Int): GNGModel = {
-    var signalIterator: Iterator[Instance] = Iterator.empty
-    var nodes = model.getNodes
-    var edges = model.getEdges
+  def fit(rdd: RDD[Instance], initModel: GNGModel, iterations: Int): GNGModel = {
     var iterationCounter = 0
+    var model = initModel
 
     while (iterationCounter < iterations) {
-      if (signalIterator.isEmpty || !signalIterator.hasNext)
-        signalIterator = rdd
-          .takeSample(withReplacement = true, this.lambda)
-          .iterator
-
-      /**
-        * 1. Generate an input signal E according to P(E).
-        * */
-      while (signalIterator.hasNext && iterationCounter < iterations) {
-        iterationCounter += 1
-        val inputSignal = signalIterator.next()
-        val vector = inputSignal.features
-
-        /**
-          * 2. Find the nearest unit S1 and the second-nearest unit S2.
-          * */
-        val distances = nodes
-          .map(n => (n, n.distanceTo(vector)))
-          .sortBy(_._2)
-
-        val (node1, dist1) = distances.head
-        val (node2, dist2) = distances.tail.head
-
-        inputSignal.label match {
-          case Some(l) =>
-            node1.setLabel(l.toInt)
-            node2.setLabel(l.toInt)
-          case None =>
-        }
-
-        inputSignal.label match {
-          case Some(l) =>
-            node1.setLabel(l.toInt)
-            node2.setLabel(l.toInt)
-          case None =>
-        }
-
-        /**
-          * 4. Add the squared distance between the input signal and
-          * the nearest unit in input space to a local counter variable.
-          * */
-        node1.error += dist1 * dist1
-        node1.utility += (dist2 * dist2) - (dist1 * dist1)
-        node1.winCounter += 1
-
-        /**
-          * 3. Increment the age of all edges emanating from S1.
-          *
-          * 5. Move S1 and its direct topological neighbors towards E by
-          * fractions Eb and En, respectively, of the total distance.
-          * */
-        node1.moveTowards(vector, eps_b)
-
-        edges.foreach{ e =>
-          if (e.has(node1)) {
-            e.age += 1
-            e.getPartner(node1).moveTowards(vector, eps_n)
-          }
-        }
-
-        /**
-          * 6. If S1 and S2 are connected by an edge, set the age of this
-          * edge to zero. If such an edge does not exist, create it.
-          * */
-        edges.find(e => e.has(node1) && e.has(node2)) match {
-          case Some(e) => e.age = 0
-          case None => edges = new Edge(node1, node2) :: edges
-        }
-
-        /**
-          * 7. Remove edges with an age larger than maxAge. If this results in
-          * points having no emanating edges, remove them as well.
-          * */
-        edges = edges.filter(_.age <= maxAge)
-        nodes = nodes.filter(n => edges.exists(_.has(n)))
-
-
-        /**
-          * 8. If the number of input signals generated so far is an integer
-          * multiple of a parameter A, insert a new unit as follows.
-          * */
-        if (iterationCounter % lambda == 0) {
-          var nodeCount = nodes.size
-
-          /**
-            * Determine the unit q with the maximum accumulated error.
-            * */
-          val q = nodes.maxBy(_.error)
-
-          /**
-            * Remove obsolete nodes.
-            * */
-          if (nodeCount >= this.maxNodes) {
-            val i = nodes
-              .filter(n => n.id != q.id && n.utility > 0)
-              .minBy(_.utility)
-
-            if (q.error / i.utility > k) {
-              nodes = nodes.filter(_.id != i.id)
-              edges = edges.filter(!_.has(i))
-              nodeCount -= 1
-            }
-          }
-
-          if (nodeCount < this.maxNodes) {
-            /**
-              * Insert a new unit r halfway between q and its neighbor f with
-              * the largest error variable
-              * */
-            val f = edges
-              .filter(_.has(q))
-              .maxBy(_.getPartner(q).error)
-              .getPartner(q)
-
-            val newVector = (q.prototype + f.prototype) * .5
-            val r = model.createNode(newVector)
-            nodes = r :: nodes
-
-            /**
-              * Insert edges connecting the new unit r with units q and f,
-              * and remove the original edge between q and f.
-              * */
-            edges = new Edge(q, r) :: new Edge(f, r) :: edges.filter(e => !(e.has(q) && e.has(f)))
-
-            /**
-              * Decrease the error variables of q and f by multiplying them
-              * with a constant alpha. Initialize the error variable of r with
-              * the new value of the error variable of q.
-              * */
-            q.error = q.error * alpha
-            f.error = f.error * alpha
-            r.error = q.error
-          }
-        }
-
-        /**
-          * 9. Decrease all error variables by multiplying them with a constant d.
-          * */
-        nodes.foreach(n => {
-          n.error *= d
-          n.utility *= d
-        })
+      val sample = rdd.takeSample(withReplacement = true, this.lambda)
+      fit(sample, model, iterationCounter) match {
+        case (m, i) =>
+          model = m
+          iterationCounter += i
       }
     }
 
-    new GNGModel(nodes, edges)
+    model
+  }
+
+  def fit(data: Array[Instance],
+           model: GNGModel,
+           iterations: Int): (GNGModel, Int) = {
+    var nodes = model.getNodes
+    var edges = model.getEdges
+    var iterationCounter = iterations
+
+    for (inputSignal <- data) {
+      val vector = inputSignal.features
+      /**
+        * 2. Find the nearest unit S1 and the second-nearest unit S2.
+        * */
+      val distances = nodes
+        .map(n => (n, n.distanceTo(vector)))
+        .sortBy(_._2)
+
+      val (node1, dist1) = distances.head
+      val (node2, dist2) = distances.tail.head
+
+      inputSignal.label match {
+        case Some(l) =>
+          node1.setLabel(l.toInt)
+          node2.setLabel(l.toInt)
+        case None =>
+      }
+
+      inputSignal.label match {
+        case Some(l) =>
+          node1.setLabel(l.toInt)
+          node2.setLabel(l.toInt)
+        case None =>
+      }
+
+      /**
+        * 4. Add the squared distance between the input signal and
+        * the nearest unit in input space to a local counter variable.
+        * */
+      node1.error += dist1 * dist1
+      node1.utility += (dist2 * dist2) - (dist1 * dist1)
+      node1.winCounter += 1
+
+      /**
+        * 3. Increment the age of all edges emanating from S1.
+        *
+        * 5. Move S1 and its direct topological neighbors towards E by
+        * fractions Eb and En, respectively, of the total distance.
+        * */
+      node1.moveTowards(vector, eps_b)
+
+      edges.foreach{ e =>
+        if (e.has(node1)) {
+          e.age += 1
+          e.getPartner(node1).moveTowards(vector, eps_n)
+        }
+      }
+
+      /**
+        * 6. If S1 and S2 are connected by an edge, set the age of this
+        * edge to zero. If such an edge does not exist, create it.
+        * */
+      edges.find(e => e.has(node1) && e.has(node2)) match {
+        case Some(e) => e.age = 0
+        case None => edges = new Edge(node1, node2) :: edges
+      }
+
+      /**
+        * 7. Remove edges with an age larger than maxAge. If this results in
+        * points having no emanating edges, remove them as well.
+        * */
+      edges = edges.filter(_.age <= maxAge)
+      nodes = nodes.filter(n => edges.exists(_.has(n)))
+
+
+      /**
+        * 8. If the number of input signals generated so far is an integer
+        * multiple of a parameter A, insert a new unit as follows.
+        * */
+      if (iterationCounter % lambda == 0) {
+        var nodeCount = nodes.size
+
+        /**
+          * Determine the unit q with the maximum accumulated error.
+          * */
+        val q = nodes.maxBy(_.error)
+
+        /**
+          * Remove obsolete nodes.
+          * */
+        if (nodeCount >= this.maxNodes) {
+          val i = nodes
+            .filter(n => n.id != q.id && n.utility > 0)
+            .minBy(_.utility)
+
+          if (q.error / i.utility > k) {
+            nodes = nodes.filter(_.id != i.id)
+            edges = edges.filter(!_.has(i))
+            nodeCount -= 1
+          }
+        }
+
+        if (nodeCount < this.maxNodes) {
+          /**
+            * Insert a new unit r halfway between q and its neighbor f with
+            * the largest error variable
+            * */
+          val f = edges
+            .filter(_.has(q))
+            .maxBy(_.getPartner(q).error)
+            .getPartner(q)
+
+          val newVector = (q.prototype + f.prototype) * .5
+          val r = model.createNode(newVector)
+          nodes = r :: nodes
+
+          /**
+            * Insert edges connecting the new unit r with units q and f,
+            * and remove the original edge between q and f.
+            * */
+          edges = new Edge(q, r) :: new Edge(f, r) :: edges.filter(e => !(e.has(q) && e.has(f)))
+
+          /**
+            * Decrease the error variables of q and f by multiplying them
+            * with a constant alpha. Initialize the error variable of r with
+            * the new value of the error variable of q.
+            * */
+          q.error = q.error * alpha
+          f.error = f.error * alpha
+          r.error = q.error
+        }
+      }
+
+      /**
+        * 9. Decrease all error variables by multiplying them with a constant d.
+        * */
+      nodes.foreach(n => {
+        n.error *= d
+        n.utility *= d
+      })
+
+      iterationCounter += 1
+    }
+
+    (new GNGModel(nodes, edges)
       .setNodeId(model.getNodeId)
-      .setFeaturesCol(this.getFeaturesCol)
+      .setFeaturesCol(this.getFeaturesCol), iterationCounter)
   }
 
 }

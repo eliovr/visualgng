@@ -439,14 +439,24 @@ class VisualGNG (private var df: DataFrame) {
       })
   }
 
-  private def initResetTraining(): Unit = {
-    this.iterationCounter = 0
-    val Array(s1, s2) = this.rdd.takeSample(false, 2)
+  private def modelInitializer(rdd: RDD[Instance]): GNGModel = {
+    val Array(s1, s2) = rdd.takeSample(false, 2)
 
     val a = new Node(1, s1.features)
     val b = new Node(2, s2.features)
 
-    this.model = new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
+    new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
+  }
+
+  private def initResetTraining(): Unit = {
+    this.iterationCounter = 0
+    this.model = modelInitializer(this.rdd)
+//    val Array(s1, s2) = this.rdd.takeSample(false, 2)
+//
+//    val a = new Node(1, s1.features)
+//    val b = new Node(2, s2.features)
+//
+//    this.model = new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
 
     updateGraph()
     updateStats()
@@ -578,6 +588,39 @@ class VisualGNG (private var df: DataFrame) {
     }
 
     this.rdd.unpersist()
+  }
+
+  private def run2(): Unit = {
+    this.rdd.persist()
+
+    try {
+      while (this.isTraining) {
+        val sample = sampler(this.rdd)
+
+        gng.fit(sample, this.model, this.iterationCounter) match {
+          case (m, i) =>
+            this.model = m
+            this.iterationCounter += i
+        }
+
+        updateStats()
+        updateGraph()
+        Thread.sleep(100)
+
+        if (this.iterationCounter >= this.maxIterations) {
+          this.isTraining = false
+          executionButton.set("Done")
+        }
+      }
+    } catch {
+      case e: Throwable =>
+        statusText.set("This was... unexpected: " + e.getMessage)
+        logger.error("VisualGNG ERROR: ", e)
+    }
+  }
+
+  private def sampler(rdd: RDD[Instance]): Array[Instance] = {
+    rdd.takeSample(withReplacement = true, gng.getLambda)
   }
 
   /**
