@@ -122,22 +122,25 @@ class GNG private (
 
   // ------------ Optimization parameters / controls ---------
 
+  /**
+    * 0. Start with two units a and b at random positions Wa and Wb in Rn.
+    * */
+  def modelInitializer(rdd: RDD[Instance]): GNGModel = {
+    val Array(s1, s2) = rdd.takeSample(false, 2)
+
+    val a = new Node(1, s1.features)
+    val b = new Node(2, s2.features)
+
+    new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
+  }
+
   def fit(df: Dataset[_], iterations: Int): GNGModel = {
     val rdd = df
       .select(featuresCol)
       .rdd
       .map{ case Row(f: SparkVector) => Instance(new DenseVector(f.toArray), None) }
 
-    /**
-      * 0. Start with two units a and b at random positions Wa and Wb in Rn.
-      * */
-
-    val Array(s1, s2) = rdd.takeSample(false, 2)
-
-    val a = new Node(1, s1.features)
-    val b = new Node(2, s2.features)
-
-    var model  = new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
+    var model = modelInitializer(rdd)
 
     rdd.persist()
     model = this.fit(rdd, model, iterations)
@@ -148,28 +151,22 @@ class GNG private (
 
   def fit(df: Dataset[_]): GNGModel = this.fit(df, this.maxIterations)
 
-  def fit(rdd: RDD[Instance], initModel: GNGModel, iterations: Int): GNGModel = {
+  def fit(rdd: RDD[Instance], initModel: GNGModel, maxIterations: Int): GNGModel = {
     var iterationCounter = 0
     var model = initModel
 
-    while (iterationCounter < iterations) {
-      val sample = rdd.takeSample(withReplacement = true, this.lambda)
-      fit(sample, model, iterationCounter) match {
-        case (m, i) =>
-          model = m
-          iterationCounter += i
-      }
+    while (iterationCounter < maxIterations) {
+      val sample = rdd.takeSample(withReplacement = true, num = this.lambda, seed = iterationCounter)
+      model = fit(sample, model)
+      iterationCounter += sample.size
     }
 
     model
   }
 
-  def fit(data: Array[Instance],
-           model: GNGModel,
-           iterations: Int): (GNGModel, Int) = {
+  def fit(data: Array[Instance], model: GNGModel): GNGModel = {
     var nodes = model.getNodes
     var edges = model.getEdges
-    var iterationCounter = iterations
 
     for (inputSignal <- data) {
       val vector = inputSignal.features
@@ -236,65 +233,6 @@ class GNG private (
       edges = edges.filter(_.age <= maxAge)
       nodes = nodes.filter(n => edges.exists(_.has(n)))
 
-
-      /**
-        * 8. If the number of input signals generated so far is an integer
-        * multiple of a parameter A, insert a new unit as follows.
-        * */
-      if (iterationCounter % lambda == 0) {
-        var nodeCount = nodes.size
-
-        /**
-          * Determine the unit q with the maximum accumulated error.
-          * */
-        val q = nodes.maxBy(_.error)
-
-        /**
-          * Remove obsolete nodes.
-          * */
-        if (nodeCount >= this.maxNodes) {
-          val i = nodes
-            .filter(n => n.id != q.id && n.utility > 0)
-            .minBy(_.utility)
-
-          if (q.error / i.utility > k) {
-            nodes = nodes.filter(_.id != i.id)
-            edges = edges.filter(!_.has(i))
-            nodeCount -= 1
-          }
-        }
-
-        if (nodeCount < this.maxNodes) {
-          /**
-            * Insert a new unit r halfway between q and its neighbor f with
-            * the largest error variable
-            * */
-          val f = edges
-            .filter(_.has(q))
-            .maxBy(_.getPartner(q).error)
-            .getPartner(q)
-
-          val newVector = (q.prototype + f.prototype) * .5
-          val r = model.createNode(newVector)
-          nodes = r :: nodes
-
-          /**
-            * Insert edges connecting the new unit r with units q and f,
-            * and remove the original edge between q and f.
-            * */
-          edges = new Edge(q, r) :: new Edge(f, r) :: edges.filter(e => !(e.has(q) && e.has(f)))
-
-          /**
-            * Decrease the error variables of q and f by multiplying them
-            * with a constant alpha. Initialize the error variable of r with
-            * the new value of the error variable of q.
-            * */
-          q.error = q.error * alpha
-          f.error = f.error * alpha
-          r.error = q.error
-        }
-      }
-
       /**
         * 9. Decrease all error variables by multiplying them with a constant d.
         * */
@@ -302,13 +240,52 @@ class GNG private (
         n.error *= d
         n.utility *= d
       })
-
-      iterationCounter += 1
     }
 
-    (new GNGModel(nodes, edges)
+    /**
+      * 8. If the number of input signals generated so far is an integer
+      * multiple of a parameter A, insert a new unit as follows.
+      *
+      * Note: this implementation will add a node for each sample batch.
+      * */
+    if (nodes.size < this.maxNodes) {
+      /**
+        * Determine the unit q with the maximum accumulated error.
+        * */
+      val q = nodes.maxBy(_.error)
+
+      /**
+        * Insert a new unit r halfway between q and its neighbor f with
+        * the largest error variable
+        * */
+      val f = edges
+        .filter(_.has(q))
+        .maxBy(_.getPartner(q).error)
+        .getPartner(q)
+
+      val newVector = (q.prototype + f.prototype) * .5
+      val r = model.createNode(newVector)
+      nodes = r :: nodes
+
+      /**
+        * Insert edges connecting the new unit r with units q and f,
+        * and remove the original edge between q and f.
+        * */
+      edges = new Edge(q, r) :: new Edge(f, r) :: edges.filter(e => !(e.has(q) && e.has(f)))
+
+      /**
+        * Decrease the error variables of q and f by multiplying them
+        * with a constant alpha. Initialize the error variable of r with
+        * the new value of the error variable of q.
+        * */
+      q.error = q.error * alpha
+      f.error = f.error * alpha
+      r.error = q.error
+    }
+
+    new GNGModel(nodes, edges)
       .setNodeId(model.getNodeId)
-      .setFeaturesCol(this.getFeaturesCol), iterationCounter)
+      .setFeaturesCol(this.getFeaturesCol)
   }
 
 }

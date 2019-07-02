@@ -215,19 +215,20 @@ class VisualGNG (private var df: DataFrame) {
 
       if (this.isTraining) {
         executionButton.set("Pause")
-        this.maxIterations = this.maxIterInput.get.toInt
-        this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
-        run()
+//        this.maxIterations = this.maxIterInput.get.toInt
+//        this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
+        run2()
+//        run()
       } else {
         this.executionButton.set("Run")
       }
     })
-    .setOnClickScript(
-      s"""
-         |let disable = this.innerText === 'Run';
-         |${this.maxIterInput.jsGetElementById}.disabled = disable;
-         |${this.maxNodesInput.jsGetElementById}.disabled = disable;
-         """.stripMargin)
+//    .setOnClickScript(
+//      s"""
+//         |let disable = this.innerText === 'Run';
+//         |${this.maxIterInput.jsGetElementById}.disabled = disable;
+//         |${this.maxNodesInput.jsGetElementById}.disabled = disable;
+//         """.stripMargin)
 
   this.refreshButton
     .setOnClickScript(
@@ -241,6 +242,8 @@ class VisualGNG (private var df: DataFrame) {
     })
 
   this.applyButton.setOnClickListener(() => {
+    this.maxIterations = this.maxIterInput.get.toInt
+    this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
     this.gng.setMaxAge(this.maxAgeInput.get.toInt)
     this.gng.setLambda(this.lambdaInput.get.toInt)
     this.gng.setEpsB(this.epsBInput.get)
@@ -439,24 +442,9 @@ class VisualGNG (private var df: DataFrame) {
       })
   }
 
-  private def modelInitializer(rdd: RDD[Instance]): GNGModel = {
-    val Array(s1, s2) = rdd.takeSample(false, 2)
-
-    val a = new Node(1, s1.features)
-    val b = new Node(2, s2.features)
-
-    new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
-  }
-
   private def initResetTraining(): Unit = {
     this.iterationCounter = 0
-    this.model = modelInitializer(this.rdd)
-//    val Array(s1, s2) = this.rdd.takeSample(false, 2)
-//
-//    val a = new Node(1, s1.features)
-//    val b = new Node(2, s2.features)
-//
-//    this.model = new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
+    this.model = this.gng.modelInitializer(this.rdd)
 
     updateGraph()
     updateStats()
@@ -473,23 +461,56 @@ class VisualGNG (private var df: DataFrame) {
 
     <div class="container">
       <div class="row">
-        <div class="col col-lg-1 btn-group" style="min-width: 150px">
+        <div class="col col-lg-2 btn-group-btn" style="min-width: 180px">
           { executionButton.elem }
           { refreshButton.elem }
-        </div>
+          <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
+            <span class="glyphicon glyphicon-cog"></span>
+          </button>
+          <ul class="dropdown-menu" style="padding: 5px" role="menu">
+            <li class="dropdown-header">Max iterations
+              <span class="glyphicon glyphicon-info-sign" title="Maximum number of iterations (input signals)"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ maxIterInput.elem }</li>
 
-        <div class="col col-lg-2" style="min-width: 180px">
-          <div class="input-group input-group-sm">
-            <span class="input-group-addon" title="Maximum number of iterations">Iterations</span>
-            { maxIterInput.elem }
-          </div>
-        </div>
+            <li class="dropdown-header">Max nodes
+              <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ maxNodesInput.elem }</li>
 
-        <div class="col col-lg-2" style="min-width: 180px">
-          <div class="input-group input-group-sm">
-            <span class="input-group-addon" title="Maximum number of nodes">Max nodes</span>
-            { maxNodesInput.elem }
-          </div>
+            <li class="dropdown-header">Lamda
+              <span class="glyphicon glyphicon-info-sign" title="Number of iterations to run before creating a new node"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
+
+            <li class="dropdown-header">Max edge age
+              <span class="glyphicon glyphicon-info-sign" title="How many iterations an 'obsolete' edge can live"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
+
+            <li class="dropdown-header">eps b
+              <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (closest node)"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ epsBInput.elem }</li>
+
+            <li class="dropdown-header">eps n
+              <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (neighbors of closest node)"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ epsNInput.elem }</li>
+
+            <li class="dropdown-header">alpha
+              <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for the neighbors of a newly created node"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ alphaInput.elem }</li>
+
+            <li class="dropdown-header">d
+              <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for all nodes"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ dInput.elem }</li>
+
+            <li class="divider"></li>
+            <li class="text-center">{ applyButton.elem }</li>
+          </ul>
         </div>
 
         <div class="col col-lg-3" style="min-width: 200px">
@@ -498,50 +519,6 @@ class VisualGNG (private var df: DataFrame) {
             { featureSelect.elem }
           </div>
         </div>
-
-        <div class="col col-lg-1" style="min-width: 150px">
-
-          <div class="btn-group">
-            <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
-              Advanced <span class="caret"></span>
-            </button>
-            <ul class="dropdown-menu" role="menu">
-              <li class="dropdown-header">Lamda
-                <span class="glyphicon glyphicon-info-sign" title="Number of iterations to run before creating a new node"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
-
-              <li class="dropdown-header">Max edge age
-                <span class="glyphicon glyphicon-info-sign" title="How many iterations an 'obsolete' edge can live"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
-
-              <li class="dropdown-header">eps b
-                <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (closest node)"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ epsBInput.elem }</li>
-
-              <li class="dropdown-header">eps n
-                <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (neighbors of closest node)"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ epsNInput.elem }</li>
-
-              <li class="dropdown-header">alpha
-                <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for the neighbors of a newly created node"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ alphaInput.elem }</li>
-
-              <li class="dropdown-header">d
-                <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for all nodes"></span>
-              </li>
-              <li onclick="event.stopPropagation();">{ dInput.elem }</li>
-
-              <li class="divider"></li>
-              <li class="text-center">{ applyButton.elem }</li>
-            </ul>
-          </div>
-        </div>
-
       </div>
 
       <div class="row">
@@ -594,35 +571,40 @@ class VisualGNG (private var df: DataFrame) {
 
   private def run2(): Unit = {
     this.rdd.persist()
+    var t = .0
+    var epoch = 0
 
     try {
       while (this.isTraining) {
-        val sample = sampler(this.rdd)
+        /** Sampler (S). */
+        val sample = rdd.takeSample(withReplacement = true, num = gng.getLambda, seed = this.iterationCounter)
 
-        gng.fit(sample, this.model, this.iterationCounter) match {
-          case (m, i) =>
-            this.model = m
-            this.iterationCounter += i
+        t += Utils.performance {
+          /** Optimizer (O). */
+          this.model = gng.fit(sample, this.model)
         }
 
+        // iterations are the number of seen signals.
+        this.iterationCounter += gng.getLambda
+        epoch += 1
+
+        /** Visualization Transformation (U). */
         updateStats()
         updateGraph()
-        Thread.sleep(100)
+
+        if (t / epoch < 1) Thread.sleep(100)
 
         if (this.iterationCounter >= this.maxIterations) {
           this.isTraining = false
           executionButton.set("Done")
         }
       }
+
     } catch {
       case e: Throwable =>
         statusText.set("This was... unexpected: " + e.getMessage)
         logger.error("VisualGNG ERROR: ", e)
     }
-  }
-
-  private def sampler(rdd: RDD[Instance]): Array[Instance] = {
-    rdd.takeSample(withReplacement = true, gng.getLambda)
   }
 
   /**
@@ -634,32 +616,38 @@ class VisualGNG (private var df: DataFrame) {
     str += " (%03d".format(percentage.toInt) + "%)"
     str += " | Nodes: " + "%03d".format(this.model.getNodes.size)
     str += " | Edges: " + "%04d".format(this.model.getEdges.size)
-    statusText.set(str)
+    this.statusText.set(str)
   }
 
 
   /**
     * Updates the force directed graph with the current state of the GNG model.
     * */
-  private def updateGraph(): Unit = {
+  private def updateGraph(
+                           minRadius: Int = 5,
+                           maxRadius: Int = 15,
+                           maxEdgeDistance: Int = 50,
+                           colorByFeature: Int = 0
+                         ): Unit = {
+
     val nodes = this.model.getNodes
     val edges = this.model.getEdges
 
     val distanceStats = edges.foldLeft(Stats())(_ + _.distance())
     val counterStats = nodes.foldLeft(Stats())(_ + _.winCounter)
-    val featureStats = nodes.foldLeft(Stats())(_ + _.prototype(selectedFeature))
+    val featureStats = nodes.foldLeft(Stats())(_ + _.prototype(this.selectedFeature))
 
     val nodeRadius: Node => Double = n =>
-      Utils.scale(counterStats.min, counterStats.max)(0, 10)(n.winCounter) + 5
+      Utils.scale(counterStats.min, counterStats.max)(0, maxRadius - minRadius)(n.winCounter) + minRadius
 
     val edgeDistance: Edge => Double = e =>
-      Utils.scale(distanceStats.min , distanceStats.max)(0, 50)(e.distance(false))
+      Utils.scale(distanceStats.min , distanceStats.max)(0, maxEdgeDistance)(e.distance(false))
 
     val toHSL = Utils.spenceHSL(featureStats) _
 
     val graphNodes = nodes.map( n => {
       val radius = nodeRadius(n)
-      val (hue, saturation, lightness) = toHSL(n.prototype(selectedFeature))
+      val (hue, saturation, lightness) = toHSL(n.prototype(this.selectedFeature))
       val hint =  s"id: ${n.id} | count: ${Utils.toShortString(n.winCounter)}"
 
       val gn = new GraphNode(n.id)
