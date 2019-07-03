@@ -4,7 +4,6 @@ import breeze.linalg.DenseVector
 import org.apache.spark.ml.linalg.{Vector => SparkVector}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{Dataset, Row}
-import se.his.sail.Instance
 
 
 class GNG private (

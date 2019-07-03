@@ -11,7 +11,7 @@ import org.apache.spark.sql.{DataFrame, Row}
 import org.apache.zeppelin.display.angular.notebookscope.AngularElem._
 import org.slf4j.LoggerFactory
 import se.his.sail.ml._
-import se.his.sail.{Instance, Stats, Utils}
+import se.his.sail.{Stats, Utils}
 
 
 /**
@@ -215,20 +215,11 @@ class VisualGNG (private var df: DataFrame) {
 
       if (this.isTraining) {
         executionButton.set("Pause")
-//        this.maxIterations = this.maxIterInput.get.toInt
-//        this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
-        run2()
-//        run()
+        run()
       } else {
         this.executionButton.set("Run")
       }
     })
-//    .setOnClickScript(
-//      s"""
-//         |let disable = this.innerText === 'Run';
-//         |${this.maxIterInput.jsGetElementById}.disabled = disable;
-//         |${this.maxNodesInput.jsGetElementById}.disabled = disable;
-//         """.stripMargin)
 
   this.refreshButton
     .setOnClickScript(
@@ -461,7 +452,7 @@ class VisualGNG (private var df: DataFrame) {
 
     <div class="container">
       <div class="row">
-        <div class="col col-lg-2 btn-group-btn" style="min-width: 180px">
+        <div class="col col-lg-2 btn-group-btn" style="min-width: 200px">
           { executionButton.elem }
           { refreshButton.elem }
           <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
@@ -534,42 +525,9 @@ class VisualGNG (private var df: DataFrame) {
   }
 
   /**
-    * Run the GNG algorithm while keepIterating is true.
+    * Run the GNG algorithm while isTraining == true.
     * */
   private def run(): Unit = {
-    this.rdd.persist()
-
-    try {
-
-      while (this.isTraining) {
-
-        this.model = gng
-          .setSeed(this.iterationCounter)
-          .fit(this.rdd, this.model, this.updateEvery)
-
-        this.iterationCounter += this.updateEvery
-        updateStats()
-        updateGraph()
-        Thread.sleep(100)
-
-        if (this.iterationCounter >= this.maxIterations) {
-          this.isTraining = false
-          executionButton.set("Done")
-        }
-      }
-
-    } catch {
-
-      case e: Throwable =>
-        statusText.set("This was unexpected: " + e.getMessage)
-        logger.error("VisualGNG ERROR: ", e)
-
-    }
-
-    this.rdd.unpersist()
-  }
-
-  private def run2(): Unit = {
     this.rdd.persist()
     var t = .0
     var epoch = 0
@@ -588,11 +546,14 @@ class VisualGNG (private var df: DataFrame) {
         this.iterationCounter += gng.getLambda
         epoch += 1
 
-        /** Visualization Transformation (U). */
+        /** Report learning state (El). */
         updateStats()
+
+        /** Visualization Transformation (U). */
         updateGraph()
 
-        if (t / epoch < 1) Thread.sleep(100)
+        /** Wait at least .1 seconds. Otherwise updates are too fast for user involvement. */
+        if (t / epoch < .1) Thread.sleep(((.1 - (t / epoch)) * 1000).toLong)
 
         if (this.iterationCounter >= this.maxIterations) {
           this.isTraining = false
@@ -753,12 +714,12 @@ class VisualGNG (private var df: DataFrame) {
       .collect()
       .map(row => (row.getInt(0), row.getLong(1)))
 
-    this.model.getNodes.zipWithIndex.foreach{ case (n, i) => {
+    this.model.getNodes.zipWithIndex.foreach{ case (n, i) =>
       counts.find(_._1 == i) match {
         case Some((_, count)) => n.winCounter = count
         case None => n.winCounter = 0
       }
-    }}
+    }
 
     updateGraph()
     this

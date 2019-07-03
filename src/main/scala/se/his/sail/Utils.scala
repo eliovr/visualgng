@@ -13,6 +13,16 @@ object Utils {
   def minkowski(p: Double)(a: DenseVector[Double], b: DenseVector[Double]): Double =
     norm(a - b, p)
 
+  def pearson(a: DenseVector[Double], b: DenseVector[Double]): Double = {
+    val m1 = norm(a, 1) / a.length
+    val m2 = norm(b, 1) / b.length
+
+    val d1 = a - m1
+    val d2 = b - m2
+
+    norm(d1 *:* d2, 1) / (norm(d1) * norm(d2))
+  }
+
   /**
     * Scale a value from a given range (max - min) to another (b - a).
     * @param min Minimum value that x can take.
@@ -92,10 +102,7 @@ object Utils {
   implicit def sourceAsWrappedSource(source: Source): WrappedSource = new WrappedSource(source)
 }
 
-/**
-  * Used as a representation of a data point or instance during training.
-  * */
-case class Instance(features: DenseVector[Double], label: Option[Int])
+
 
 private [sail] class WrappedSource (val source: Source) {
   def format(values: Map[String, Any]): String = {

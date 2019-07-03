@@ -35,8 +35,8 @@ class ForceDirectedGraph (height: Int = 600, width: Int = 600) {
   lazy val elem: Elem = {
     <div id={this.id} style={s"min-width: ${width}px;"}>
       <svg height={height.toString} width={width.toString}>
-        <g class="links" style="stroke: black; stroke-opacity: .5; stroke-width: .5"></g>
-        <g class="nodes" style="stroke: #fff; stroke-width: 2px; fill: lightgray;"></g>
+        <g class="links" style="stroke: black; stroke-opacity: .3; stroke-width: .5"></g>
+        <g class="nodes" style="stroke: #fff; stroke-width: 1.5px; fill: lightgray;"></g>
       </svg>
       <script> {new ScriptText(script)} </script>
     </div>
