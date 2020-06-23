@@ -29,7 +29,6 @@ Add a reference to the generated jar file to the Spark interpreter through the Z
 An example using the [Iris dataset](https://archive.ics.uci.edu/ml/datasets/Iris) from the UCI repository:
 
 ```scala
-import se.his.sail.zeppelin.VisualGNG
 
 val df = spark.
     read.

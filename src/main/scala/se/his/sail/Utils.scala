@@ -1,5 +1,7 @@
 package se.his.sail
 
+import java.awt.image.BufferedImage
+
 import breeze.linalg._
 
 import scala.collection.mutable
@@ -99,9 +101,23 @@ object Utils {
     }
   }
 
+  def createImage(pixels: Matrix[Int], saveTo: String, format: String = "png"): Unit = {
+    val h = pixels.rows
+    val w = pixels.cols
+    val imgType = BufferedImage.TYPE_BYTE_GRAY
+    val image = new BufferedImage(w, h, imgType)
+
+    for (y <- 0 until h) {
+      for (x <- 0 until w) {
+        image.setRGB(x, y, pixels(x, y))
+      }
+    }
+
+    javax.imageio.ImageIO.write(image, format, new java.io.File(saveTo))
+  }
+
   implicit def sourceAsWrappedSource(source: Source): WrappedSource = new WrappedSource(source)
 }
-
 
 
 private [sail] class WrappedSource (val source: Source) {

@@ -2,20 +2,18 @@ package se.his.sail.zeppelin
 
 import org.apache.zeppelin.display.angular.notebookscope._
 import AngularElem._
-import se.his.sail.Utils._
+import se.his.sail.Utils
 
 import scala.collection.mutable
 import scala.xml.Elem
 
-class ForceDirectedGraph (height: Int = 600, width: Int = 600) {
+class ForceDirectedGraph private (val id: String) {
 
-  val id: String = ForceDirectedGraph.nextID
-
-  private val events: mutable.Map[String, String] = mutable.Map(
-    "onmouseover" -> "",
-    "onmouseout" -> "",
-    "onclicked" -> "",
-    "onupdate" -> "")
+  var height: Int = 600
+  var width: Int = 600
+  var minNodeRadius: Int = 5
+  var maxNodeRadius: Int = 15
+  var maxEdgeDistance: Int = 50
 
   /**
     * Id for the HTML element where data is to be "dropped".
@@ -33,12 +31,15 @@ class ForceDirectedGraph (height: Int = 600, width: Int = 600) {
     * The HTML force directed graph element.
     * */
   lazy val elem: Elem = {
-    <div id={this.id} style={s"min-width: ${width}px;"}>
-      <svg height={height.toString} width={width.toString}>
-        <g class="links" style="stroke: black; stroke-opacity: .3; stroke-width: .5"></g>
-        <g class="nodes" style="stroke: #fff; stroke-width: 1.5px; fill: lightgray;"></g>
-      </svg>
-      <script> {new ScriptText(script)} </script>
+    val script = new ScriptText(
+      s"""
+         |var $id = new ForceDirectedGraph('$id', $width, $height);
+         |${this.id}.watchBucket('$dataBucketId');
+         |""".stripMargin)
+
+    <div style={s"min-width: ${width}px;"}>
+      <svg id={this.id}></svg>
+      <script> { script } </script>
     </div>
   }
 
@@ -46,53 +47,20 @@ class ForceDirectedGraph (height: Int = 600, width: Int = 600) {
     * Set and display nodes and edges on the force directed graph.
     * It replaces previous nodes and edges.
     * */
-  def setData(nodes: List[GraphNode], edges: List[GraphEdge]): this.type = {
-    val jsonNodes = nodes.mkString(",")
-    val jsonEdges = edges.mkString(",")
-    val data = "{\"nodes\": [" + jsonNodes + "], \"links\": [" + jsonEdges + "]}"
+  def setData(nodes: Iterable[GraphNode], edges: Iterable[GraphEdge]): this.type = {
+    val jsonNodes = nodes.mkString("[", ",", "]")
+    val jsonEdges = edges.mkString("[", ",", "]")
+    val data = s"""{"nodes": $jsonNodes, "links": $jsonEdges}"""
 
     // push data to the html bucket element
     this.dataBucket.model(this.dataBucketId, data)
     this
   }
 
-  def setClickedScript(script: String): this.type = {
-    this.events += "onclicked" -> script
+  def addListener(elem: String): this.type = {
+    val js = new ScriptText(s"$id.addListener($elem);")
+    <script>{ js }</script>.display()
     this
-  }
-
-  def setMouseoverScript(script: String): this.type = {
-    this.events += "onmouseover" -> script
-    this
-  }
-
-  def setMouseoutScript(script: String): this.type = {
-    this.events += "onmouseout" -> script
-    this
-  }
-
-  def setOnUpdateScript(script: String): this.type = {
-    this.events += "onupdate" -> script
-    this
-  }
-
-  def scriptSetData(nodes: String, links: String): String =
-    s"fdgSetData($id, $nodes, $links)"
-
-  /**
-    * Javascript code which handles the the force directed graph.
-    * */
-  private def script: String = {
-    getResource("js/fdg.js").format(Map(
-      "$id" -> this.id,
-      "$dataBucketId" -> this.dataBucketId,
-      "$width" -> width,
-      "$height" -> height,
-      "$onMouseover" -> this.events("onmouseover"),
-      "$onMouseout" -> this.events("onmouseout"),
-      "$onClicked" -> this.events("onclicked"),
-      "$onUpdate" -> this.events("onupdate")
-    ))
   }
 
 }
@@ -100,12 +68,24 @@ class ForceDirectedGraph (height: Int = 600, width: Int = 600) {
 object ForceDirectedGraph {
   private var idCounter = 0
 
+  private def initialize(): Unit = {
+    val script = Utils.getResource("js/fdg.js").getLines().mkString("\n")
+    <script> { new ScriptText(script) } </script>.display()
+  }
+
   /**
     * Next ID for a Parallel Coordinates object.
     * */
-  private def nextID: String = {
+  private def nextId: String = {
     idCounter += 1
     s"fdg_$idCounter"
+  }
+
+  def apply(): ForceDirectedGraph = {
+    if (idCounter == 0) {
+      initialize()
+    }
+    new ForceDirectedGraph(this.nextId)
   }
 }
 
@@ -143,6 +123,11 @@ class GraphNode(val id: Int, radius: Double = 5) {
 
   def setHint(hint: String): GraphNode = {
     attr += "hint" -> ("\"" + hint + "\"")
+    this
+  }
+
+  def setImage(url: String): GraphNode = {
+    attr += "img" -> ("\"" + url + "\"")
     this
   }
 

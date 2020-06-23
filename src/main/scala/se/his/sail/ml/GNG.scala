@@ -1,290 +1,307 @@
 package se.his.sail.ml
-
-import breeze.linalg.DenseVector
+import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.ml.linalg.{Vector => SparkVector}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{Dataset, Row}
+import breeze.{linalg => br}
+
+import scala.collection.mutable.ArrayBuffer
 
 
 class GNG private (
-  private var maxIterations: Int,   // maximum iterations
-  private var lambda: Int,    // how often to add new nodes/units
-  private var maxNodes: Int,  // maximum number of nodes
-  private var eps_b: Double,  // adaptation step size for closest node
-  private var eps_n: Double,  // adaptation step size for neighbors
-  private var maxAge: Int,    // maximum edge age
-  private var alpha: Double,  // error reduction rate for the neighbors of a newly created node
-  private var d: Double,      // error reduction rate for all nodes
-  private var k: Double) {
+                    var iterations: Int, // maximum iterations
+                    var lambda: Int, // how often to add new nodes/units
+                    var maxNodes: Int, // maximum number of nodes
+                    var eps_b: Double, // adaptation step size for closest node
+                    var eps_n: Double, // adaptation step size for neighbors
+                    var maxAge: Int, // maximum edge age
+                    var alpha: Double, // error reduction rate for the neighbors of a newly created node
+                    var d: Double, // error reduction rate for all nodes
+                    var k: Double,
+                    var moving: Boolean, // whether it should model a moving distribution
+                    var untangle: Boolean // constraints the creation of edges
+                     ) {
 
-  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3)
+  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true)
 
-  private var featuresCol = "features"
+  var inputCol = "features"
 
-  private var labelCol: Option[String] = None
-
-  private var seed: Long = 20
-
-  /**
-    * Maximum number of iterations.
-    * */
-  def getMaxIterations: Int = this.maxIterations
-
-  /**
-    * Set maximum number of iterations
-    * */
-  def setMaxIterations(i: Int): this.type = {
-    require(i > 0)
-    this.maxIterations = i
+  def setInputCol(col: String): this.type = {
+    this.inputCol = col
     this
   }
 
-  /**
-    * Frequency with which new nodes are added i.e. maxIterations % lambda == 0
-    * */
-  def getLambda: Int = this.lambda
-
-  /**
-    * Set frequency with which new nodes are added i.e. maxIterations % lambda == 0
-    * */
-  def setLambda(l: Int): this.type = {
-    require(l > 0)
-    this.lambda = l
+  def setIterations(iterations: Int): this.type = {
+    this.iterations = iterations
     this
   }
 
-  def getMaxNodes: Int = this.maxNodes
-
-  def setMaxNodes(n: Int): this.type = {
-    this.maxNodes = n
+  def setLambda(lambda: Int): this.type = {
+    this.lambda = lambda
     this
   }
 
-  def getEpsB: Double = this.eps_b
-
-  def setEpsB(e: Double): this.type = {
-    this.eps_b = e
+  def setMaxNodes(maxNodes: Int): this.type = {
+    this.maxNodes = maxNodes
     this
   }
 
-  def getEpsN: Double = this.eps_n
-
-  def setEpsN(e: Double): this.type = {
-    this.eps_n = e
+  def setMaxAge(maxAge: Int): this.type = {
+    this.maxAge = maxAge
     this
   }
 
-  def getMaxAge: Int = this.maxAge
-
-  def setMaxAge(a: Int): this.type = {
-    this.maxAge = a
+  def setEpsB(eps: Double): this.type = {
+    this.eps_b = eps
     this
   }
 
-  def getAlpha: Double = this.alpha
-
-  def setAlpha(a: Double): this.type = {
-    this.alpha = a
+  def setEpsN(eps: Double): this.type = {
+    this.eps_n = eps
     this
   }
 
-  def getD: Double = this.d
+  def setAlpha(alpha: Double): this.type = {
+    this.alpha = alpha
+    this
+  }
 
   def setD(d: Double): this.type = {
     this.d = d
     this
   }
 
-  def getK: Double = this.k
-
   def setK(k: Double): this.type = {
     this.k = k
     this
   }
 
-  def getFeaturesCol: String = this.featuresCol
-
-  def setFeaturesCol(col: String): this.type = {
-    this.featuresCol = col
+  def setMoving(moving: Boolean): this.type = {
+    this.moving = moving
     this
   }
 
-  def setLabelCol(col: String): this.type = {
-    this.labelCol = Some(col)
+  def setUntangle(disentangle: Boolean): this.type = {
+    this.untangle = disentangle
     this
   }
 
-  def setSeed(s: Long): this.type = {
-    this.seed = s
-    this
-  }
+  def getIterations: Int = this.iterations
+  def getLambda: Int = this.lambda
+  def getMaxNodes: Int = this.maxNodes
+  def getEpsB: Double = this.eps_b
+  def getEpsN: Double = this.eps_n
+  def getMaxAge: Int = this.maxAge
+  def getAlpha: Double = this.alpha
+  def getD: Double = this.d
+  def getK: Double = this.k
+  def isMoving: Boolean = this.moving
+  def isUntangle: Boolean  = this.untangle
+  def getInputCol: String = this.inputCol
 
-  // ------------ Optimization parameters / controls ---------
 
-  /**
-    * 0. Start with two units a and b at random positions Wa and Wb in Rn.
-    * */
-  def modelInitializer(rdd: RDD[Instance]): GNGModel = {
-    val Array(s1, s2) = rdd.takeSample(false, 2)
-
-    val a = new Node(1, s1.features)
-    val b = new Node(2, s2.features)
-
-    new GNGModel(a :: b :: Nil, new Edge(a, b) :: Nil)
-  }
-
-  def fit(df: Dataset[_], iterations: Int): GNGModel = {
-    val rdd = df
-      .select(featuresCol)
-      .rdd
-      .map{ case Row(f: SparkVector) => Instance(new DenseVector(f.toArray), None) }
-
-    var model = modelInitializer(rdd)
-
-    rdd.persist()
-    model = this.fit(rdd, model, iterations)
+  def fit(ds: Dataset[_]): GNGModel = {
+    val rdd = ds.select(this.inputCol).rdd.map{
+      case Row(f: SparkVector) => new br.DenseVector(f.toArray)
+    }.persist()
+    val model = this.fit(rdd)()
     rdd.unpersist()
     model
-
   }
 
-  def fit(df: Dataset[_]): GNGModel = this.fit(df, this.maxIterations)
+  def fit(rdd: RDD[br.DenseVector[Double]])(model: GNGModel = GNGModel.createModel(rdd)): GNGModel = {
+    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
+    val reduceFit = GNG.fit(lambda, maxNodes, .5, eps_n, maxAge, alpha, d, k, moving, untangle) _
+    val iterations = this.iterations
 
-  def fit(rdd: RDD[Instance], initModel: GNGModel, maxIterations: Int): GNGModel = {
-    var iterationCounter = 0
-    var model = initModel
+    val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
+      val points = next.toArray
+      var m = model
 
-    while (iterationCounter < maxIterations) {
-      val sample = rdd.takeSample(withReplacement = true, num = this.lambda, seed = iterationCounter)
-      model = fit(sample, model)
-      iterationCounter += sample.size
+      for (_ <- 0 until iterations) {
+        m = mapFit(m, points)
+      }
+
+      Seq(model).iterator
     }
 
-    model
+    models.reduce{ (acc: GNGModel, m: GNGModel) =>
+      reduceFit(acc, m.nodes.map(_.prototype))
+    }.setInputCol(this.inputCol)
   }
 
-  def fit(data: Array[Instance], model: GNGModel): GNGModel = {
-    var nodes = model.getNodes
-    var edges = model.getEdges
+  def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel.createModel(arr)): GNGModel = {
+    val fitFunc = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
+    var m = model
+    for (_ <- 0 until iterations) {
+      m = fitFunc(m, arr)
+    }
+    m
+  }
+}
 
-    for (inputSignal <- data) {
-      val vector = inputSignal.features
+case object GNG {
+  def fit(lambda: Int, maxNodes: Int, eps_b: Double, eps_n: Double, maxAge: Int, alpha: Double, d: Double, k: Double, moving: Boolean, disentangle: Boolean)
+         (model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+    var units = model.nodes
+    var edges = model.edges
+    var signalCounter = 0
+
+    for (signal <- inputSignals) {
+      signalCounter += 1
+
       /**
         * 2. Find the nearest unit S1 and the second-nearest unit S2.
-        * */
-      val distances = nodes
-        .map(n => (n, n.distanceTo(vector)))
+        **/
+      val distances = units
+        .map(n => (n, n.distanceTo(signal)))
         .sortBy(_._2)
 
-      val (node1, dist1) = distances.head
-      val (node2, dist2) = distances.tail.head
-
-      inputSignal.label match {
-        case Some(l) =>
-          node1.setLabel(l.toInt)
-          node2.setLabel(l.toInt)
-        case None =>
-      }
-
-      inputSignal.label match {
-        case Some(l) =>
-          node1.setLabel(l.toInt)
-          node2.setLabel(l.toInt)
-        case None =>
-      }
+      val (unitA, distA): (Node, Double) = distances.head
+      val (unitB, distB): (Node, Double) = distances.tail.head
 
       /**
         * 4. Add the squared distance between the input signal and
         * the nearest unit in input space to a local counter variable.
-        * */
-      node1.error += dist1 * dist1
-      node1.utility += (dist2 * dist2) - (dist1 * dist1)
-      node1.winCounter += 1
+        **/
+      unitA.error += distA * distA
+      unitA.utility += (distB * distB) - (distA * distA)
+      unitA.winCounter += 1
 
       /**
         * 3. Increment the age of all edges emanating from S1.
         *
         * 5. Move S1 and its direct topological neighbors towards E by
         * fractions Eb and En, respectively, of the total distance.
-        * */
-      node1.moveTowards(vector, eps_b)
+        **/
+      unitA.moveTowards(signal, eps_b)
 
-      edges.foreach{ e =>
-        if (e.has(node1)) {
+      var countA, countB = 0  // use counts for disentanglement.
+      var abEdge: Option[Edge] = None
+
+      edges.foreach { e =>
+        if (e.connects(unitA)) {
           e.age += 1
-          e.getPartner(node1).moveTowards(vector, eps_n)
+          e.getPartner(unitA).moveTowards(signal, eps_n)
+          countA += 1
+        } else if (e.connects(unitB)) {
+          countB += 1
+        }
+
+        if (e.connects(unitA, unitB)) {
+          abEdge = Some(e)
         }
       }
 
       /**
         * 6. If S1 and S2 are connected by an edge, set the age of this
         * edge to zero. If such an edge does not exist, create it.
-        * */
-      edges.find(e => e.has(node1) && e.has(node2)) match {
+        **/
+      abEdge match {
         case Some(e) => e.age = 0
-        case None => edges = new Edge(node1, node2) :: edges
+
+        case None =>  // -------------- Connect if 1 close neighbor and 4 connections at most
+          if (!disentangle || (hasOneCloseNeighbor(unitA, unitB, edges) && countA <= 4  && countB <= 4))
+            edges.append(new Edge(unitA, unitB))
+
       }
 
       /**
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
-        * */
+        **/
       edges = edges.filter(_.age <= maxAge)
-      nodes = nodes.filter(n => edges.exists(_.has(n)))
+      units = units.filter(n => edges.exists(_.connects(n)))
 
       /**
         * 9. Decrease all error variables by multiplying them with a constant d.
-        * */
-      nodes.foreach(n => {
+        **/
+      units.foreach(n => {
         n.error *= d
         n.utility *= d
       })
+
+      /**
+        * 8. If the number of input signals generated so far is an integer
+        * multiple of a parameter A, insert a new unit as follows.
+        **/
+      if (signalCounter % lambda == 0) {
+        /**
+          * Determine the unit q with the maximum accumulated error.
+          **/
+        val q = units.maxBy(_.error)
+
+        /**
+          * Remove obsolete nodes (in case of moving distribution).
+          * */
+        if (moving && units.lengthCompare(maxNodes) >= 0) {
+          val i = units
+            .filter(n => n.id != q.id && n.utility > 0)
+            .minBy(_.utility)
+
+          if (q.error / i.utility > k) {
+            units = units.filter(_.id != i.id)
+            edges = edges.filter(!_.connects(i))
+          }
+        }
+
+        if (units.lengthCompare(maxNodes) < 0) {
+          /**
+            * Insert a new unit r halfway between q and its neighbor f with
+            * the largest error variable
+            **/
+          val f = edges
+            .filter(_.connects(q))
+            .maxBy(_.getPartner(q).error)
+            .getPartner(q)
+
+          val newVector = (q.prototype + f.prototype) * .5
+          val r = model.createUnit(newVector)
+          units.append(r)
+
+          /**
+            * Insert edges connecting the new unit r with units q and f,
+            * and remove the original edge between q and f.
+            **/
+          edges = edges.filterNot(_.connects(q, f))
+          edges.append(new Edge(q, r))
+          edges.append(new Edge(f, r))
+
+          /**
+            * Decrease the error variables of q and f by multiplying them
+            * with a constant alpha. Initialize the error variable of r with
+            * the new value of the error variable of q.
+            **/
+          q.error = q.error * alpha
+          f.error = f.error * alpha
+          r.error = q.error
+        }
+
+      }
     }
 
-    /**
-      * 8. If the number of input signals generated so far is an integer
-      * multiple of a parameter A, insert a new unit as follows.
-      *
-      * Note: this implementation will add a node for each sample batch.
-      * */
-    if (nodes.size < this.maxNodes) {
-      /**
-        * Determine the unit q with the maximum accumulated error.
-        * */
-      val q = nodes.maxBy(_.error)
-
-      /**
-        * Insert a new unit r halfway between q and its neighbor f with
-        * the largest error variable
-        * */
-      val f = edges
-        .filter(_.has(q))
-        .maxBy(_.getPartner(q).error)
-        .getPartner(q)
-
-      val newVector = (q.prototype + f.prototype) * .5
-      val r = model.createNode(newVector)
-      nodes = r :: nodes
-
-      /**
-        * Insert edges connecting the new unit r with units q and f,
-        * and remove the original edge between q and f.
-        * */
-      edges = new Edge(q, r) :: new Edge(f, r) :: edges.filter(e => !(e.has(q) && e.has(f)))
-
-      /**
-        * Decrease the error variables of q and f by multiplying them
-        * with a constant alpha. Initialize the error variable of r with
-        * the new value of the error variable of q.
-        * */
-      q.error = q.error * alpha
-      f.error = f.error * alpha
-      r.error = q.error
-    }
-
-    new GNGModel(nodes, edges)
-      .setNodeId(model.getNodeId)
-      .setFeaturesCol(this.getFeaturesCol)
+    model.nodes = units
+    model.edges = edges
+    model
   }
 
+  def hasOneCloseNeighbor(a: Node, b: Node, edges: ArrayBuffer[Edge], maxSteps: Int = 2): Boolean = {
+    var _edges = edges
+    var units = ArrayBuffer(a)
+    var neighborsCount = 0
+    var steps = 1
+    while (neighborsCount <= 1 && steps <= maxSteps && _edges.nonEmpty) {
+      var nextUnits: ArrayBuffer[Node] = ArrayBuffer.empty
+      for (u <- units if neighborsCount <= 1) {
+        neighborsCount += _edges.count(_.connects(u, b))
+        if (neighborsCount <= 1) {
+          nextUnits = _edges.filter(_.connects(u)).map(_.getPartner(u))
+          _edges = _edges.filterNot(_.connects(u))
+        }
+      }
+      units = nextUnits
+      steps += 1
+    }
+
+    neighborsCount == 1
+  }
 }

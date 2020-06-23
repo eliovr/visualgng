@@ -3,13 +3,12 @@ package se.his.sail.zeppelin
 import org.apache.zeppelin.display.angular.paragraphscope._
 import AngularElem._
 import org.apache.spark.mllib.stat.MultivariateStatisticalSummary
+import se.his.sail.Utils
 import se.his.sail.Utils._
 
 import scala.xml.Elem
 
-class ParallelCoordinates {
-
-  val id: String = ParallelCoordinates.nextID
+class ParallelCoordinates private (val id: String) {
 
   /**
     * ID of the HTML element where data is to be "dropped".
@@ -36,27 +35,7 @@ class ParallelCoordinates {
   var stats: Option[MultivariateStatisticalSummary] = None
 
 
-  /**
-    * Javascript code to be called when the plot is displayed.
-    * */
-  private var onDisplayScript: String = ""
-
-  /**
-    * Javascript code to be called when a PC filter is dragged.
-    * */
-  private var onFilterScript: String = ""
-
-  /**
-    * Hue/color of the lines.
-    * */
-  private var lineHue = "gray"
-
   private var colorBy: Option[Int] = Some(0)
-
-  /**
-    * Width of the lines.
-    * */
-  private var lineWidth = .5
 
   private var displayed = false
 
@@ -72,27 +51,6 @@ class ParallelCoordinates {
 
   def isDisplayed: Boolean = this.displayed
 
-  /**
-    * Sets the color of the lines (data points) in the plot.
-    * Must be set before calling push().
-    *
-    * @param hue CSS color of the lines (e.g. red, #ccc). Default is gray.
-    * */
-  def setLineHue(hue: String): ParallelCoordinates = {
-    this.lineHue = hue
-    this
-  }
-
-  /**
-    * Sets the width of the lines (data points) in the plot.
-    * Must be set before calling push().
-    *
-    * @param width Width in pixels. Default is 0.5 px.
-    * */
-  def setLineWidth(width: Double): ParallelCoordinates = {
-    this.lineWidth = width
-    this
-  }
 
   /**
     * Set a data feature by which the lines will be colored.
@@ -116,14 +74,32 @@ class ParallelCoordinates {
     require(this.featureNames.nonEmpty, "Feature names cannot be empty")
     require(this.stats.nonEmpty, "Stats (MultivariateStatisticalSummary of the features) must be set")
 
+    val stats = this.stats.get
+
+    val features = (this.featureNames, stats.max.toArray, stats.min.toArray)
+      .zipped
+      .map((name, max, min) => s"{name: '$name', min: $min, max: $max}")
+      .mkString("[", ",", "]")
+
+    val script = new ScriptText(
+      s"""
+         |var $id = new ParallelCoordinates('$id');
+         |$id.setFeatures($features);
+         |${this.id}.watchBucket('$dataBucketId');
+         |""".stripMargin)
+
     this.displayed = true
 
-    <div id={id}>
-      <svg></svg>
-      <script>
-        {new ScriptText(jsScript)}
-      </script>
+    <div>
+      <svg id={this.id}></svg>
+      <script> { script } </script>
     </div>
+  }
+
+  def addListener(elem: String): this.type = {
+    val js = new ScriptText(s"$id.addListener($elem);")
+    <script>{ js }</script>.display()
+    this
   }
 
   /**
@@ -134,53 +110,27 @@ class ParallelCoordinates {
     this.displayed = true
     this
   }
-
-  /**
-    * Set a Javascript code to be executed when the plot is displayed.
-    * Has to be set before accessing/displaying the PC element.
-    * */
-  def setOnDisplayScript(script: String): this.type = {
-    this.onDisplayScript = script
-    this
-  }
-
-  /**
-    * Set a Javascript code to be executed when a PC filter is dragged.
-    * Has to be set before accessing/displaying the PC element.
-    * */
-  def setOnFilterScript(script: String): this.type = {
-    this.onFilterScript = script
-    this
-  }
-
-  def scriptSetData(varName: String): String =
-    s"$id.setData($varName);"
-
-  private def jsScript: String = {
-    val stats = this.stats.get
-
-    val features = (this.featureNames, stats.max.toArray, stats.min.toArray)
-      .zipped
-      .map((name, max, min) => s"{name: '$name', min: $min, max: $max}")
-      .mkString("[", ",", "]")
-
-    getResource("js/pc.js").format(Map(
-      "$id" -> this.id,
-      "$dataBucketId" -> this.dataBucketId,
-      "$features" -> features,
-      "$onFilterScript" -> this.onFilterScript,
-      "$onDisplayScript" -> this.onDisplayScript
-    ))
-  }
 }
 
 object ParallelCoordinates {
   private var idCounter = 0
 
+  private def initialize(): Unit = {
+    val script = Utils.getResource("js/pc.js").getLines().mkString("\n")
+    <script> { new ScriptText(script) } </script>.display()
+  }
+
+  def apply(): ParallelCoordinates = {
+    if (idCounter == 0) {
+      initialize()
+    }
+    new ParallelCoordinates(this.nextId)
+  }
+
   /**
     * Next ID for a Parallel Coordinates object.
     * */
-  private def nextID: String = {
+  private def nextId: String = {
     idCounter += 1
     s"pc_$idCounter"
   }

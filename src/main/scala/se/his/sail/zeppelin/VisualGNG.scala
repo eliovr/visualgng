@@ -1,18 +1,17 @@
 package se.his.sail.zeppelin
 
-import breeze.linalg.DenseVector
+import breeze.{linalg => br}
 import org.apache.spark.ml.clustering.{KMeans, KMeansModel}
 import org.apache.spark.ml.feature.{StandardScaler, StringIndexer, VectorAssembler}
 import org.apache.spark.ml.linalg.{SQLDataTypes, Vectors, Vector => SparkVector}
 import org.apache.spark.mllib
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.zeppelin.display.angular.notebookscope.AngularElem._
 import org.slf4j.LoggerFactory
 import se.his.sail.ml._
 import se.his.sail.{Stats, Utils}
-
 
 /**
   * A Visual Analytics library for the Growning Neural Gas (GNG) algorithm (Fritzke)
@@ -25,7 +24,7 @@ import se.his.sail.{Stats, Utils}
   *           The setLabelCol method allows to mark a feature as a label, and will not be used in training GNG.
   *           The setScale method sets the flag for scaling training features.
   * */
-class VisualGNG (private var df: DataFrame) {
+class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val logger = LoggerFactory.getLogger(classOf[GNG])
 
@@ -33,19 +32,17 @@ class VisualGNG (private var df: DataFrame) {
 
   import spark.implicits._
 
-  private val allowedDataTypes =
-    List(DoubleType, IntegerType, BooleanType, FloatType, SQLDataTypes.VectorType)
+  private val allowedDataTypes = List(DoubleType, IntegerType, BooleanType, FloatType, SQLDataTypes.VectorType)
 
+  private var rdd: RDD[br.DenseVector[Double]] = spark.sparkContext.emptyRDD
 
-  private var rdd: RDD[Instance] = spark.sparkContext.emptyRDD
+  private val gng = new GNG().setIterations(1)
 
-  private val gng = new GNG
+  var model: GNGModel = _
 
-  var model: GNGModel = new GNGModel()
+  private val pc: ParallelCoordinates = ParallelCoordinates()
 
-  private val pc: ParallelCoordinates = new ParallelCoordinates()
-
-  private val fdg = new ForceDirectedGraph
+  private val fdg: ForceDirectedGraph = ForceDirectedGraph()
 
 
   // ------------- process variables -------------
@@ -54,10 +51,9 @@ class VisualGNG (private var df: DataFrame) {
     * Whether to continue to iterate (to fit the model to the data) or not.
     * */
   private var isTraining = false
-
-  private var maxIterations = gng.getMaxIterations
-
-  private var iterationCounter = 0
+  private var maxEpochs = 100
+  private var epochs = 0
+  private var accTime = .0
 
   /**
     * How often (training iterations) to update the Force Directed Graph.
@@ -74,6 +70,8 @@ class VisualGNG (private var df: DataFrame) {
   private var idCol: Option[String] = None
 
   private var scaleValues =  false
+
+  private var isImages = false
 
   /**
     * Sets the features (DataFrame columns) to be used in GNG training (as used by VectorAssembler).
@@ -120,6 +118,12 @@ class VisualGNG (private var df: DataFrame) {
     this
   }
 
+  def setIsImages(isImages: Boolean): this.type = {
+    this.isImages = isImages
+    this
+  }
+
+
   /**
     * Names of the features used in training. This may vary depending on the previous three.
     * */
@@ -130,7 +134,7 @@ class VisualGNG (private var df: DataFrame) {
   /**
     * DataFrame column where the feature vectors are found.
     * */
-  private var featuresCol: String = "gng_features"
+  private var inputCol: String = "gng_features"
 
 
   // ------------- User controls -------------
@@ -156,7 +160,7 @@ class VisualGNG (private var df: DataFrame) {
   private var featureSelect: Select = _
 
 
-  private val maxIterInput: InputNumber = new InputNumber(this.maxIterations)
+  private val maxEpochsInput: InputNumber = new InputNumber(this.maxEpochs)
     .setMin(100)
     .setStep(10)
 
@@ -192,6 +196,7 @@ class VisualGNG (private var df: DataFrame) {
     .setMax(1)
     .setStep(.1)
 
+  private val untangleInput: Checkbox = new Checkbox(this.gng.isUntangle)
 
   /**
     * Text used for displaying the current status of the training.
@@ -224,7 +229,7 @@ class VisualGNG (private var df: DataFrame) {
   this.refreshButton
     .setOnClickScript(
       s"""
-         |${this.maxIterInput.jsGetElementById}.disabled = false;
+         |${this.maxEpochsInput.jsGetElementById}.disabled = false;
          |${this.maxNodesInput.jsGetElementById}.disabled = false;
          """.stripMargin)
     .setOnClickListener(() => {
@@ -233,7 +238,7 @@ class VisualGNG (private var df: DataFrame) {
     })
 
   this.applyButton.setOnClickListener(() => {
-    this.maxIterations = this.maxIterInput.get.toInt
+    this.maxEpochs = this.maxEpochsInput.get.toInt
     this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
     this.gng.setMaxAge(this.maxAgeInput.get.toInt)
     this.gng.setLambda(this.lambdaInput.get.toInt)
@@ -241,97 +246,12 @@ class VisualGNG (private var df: DataFrame) {
     this.gng.setEpsN(this.epsNInput.get)
     this.gng.setAlpha(this.alphaInput.get)
     this.gng.setD(this.dInput.get)
+    this.gng.setUntangle(this.untangleInput.get)
   })
-
-  this.fdg
-    .setMouseoverScript(
-      s"""
-         |if (typeof ${pc.id} !== 'undefined') {
-         |  let pc = ${pc.id};
-         |  let lines = pc.getSeries();
-         |
-           |  lines
-         |    .filter(function(d){ return !d.selected; })
-         |    .attr('stroke-width', null)
-         |    .attr('stroke-opacity', .25);
-         |
-           |  lines
-         |    .filter(function(d){ return d.id === node.id; })
-         |    .attr('stroke', pc.getStroke)
-         |    .attr('stroke-width', 3)
-         |    .attr('stroke-opacity', 1);
-         |}
-         """.stripMargin)
-    .setMouseoutScript(
-      s"""
-         |let fdg = ${fdg.id};
-         |
-           |if (typeof ${pc.id} !== 'undefined') {
-         |  let pc = ${pc.id};
-         |  if (fdg.selectedCounter <= 0) {
-         |    pc.getSeries()
-         |      .attr('stroke', pc.getStroke)
-         |      .attr('stroke-width', null)
-         |      .attr('stroke-opacity', null);
-         |  } else {
-         |    pc.getSeries()
-         |      .filter(function(d){ return !d.selected; })
-         |      .attr('stroke-width', null)
-         |      .attr('stroke-opacity', .25);
-         |  }
-         |}
-         |
-        """.stripMargin)
-    .setClickedScript(
-      s"""
-         |if (typeof ${pc.id} !== 'undefined') {
-         |  let pc = ${pc.id};
-         |  let line = pc.getSeries().data()
-         |    .find(function(d){ return d.id === node.id; });
-         |
-           |  if (line) line.selected = node.selected;
-         |}
-        """.stripMargin)
-    .setOnUpdateScript(
-      s"""
-         |if (typeof ${pc.id} !== 'undefined')
-         |  ${pc.scriptSetData("data")}
-        """.stripMargin)
-
-  this.pc
-    .setOnDisplayScript(
-      s"""
-         |var data = ${fdg.id}.nodes.data();
-         |if (typeof ${pc.id} !== 'undefined')
-         |  ${pc.scriptSetData("data")}
-      """.stripMargin)
-    .setOnFilterScript(
-      s"""
-         |let fdg = ${fdg.id};
-         |let nodes = fdg.nodes;
-         |let selectedElems = elems.data();
-         |let selectedNodes = nodes
-         |  .filter(function(d) {
-         |    for (let i = 0 ; i < selectedElems.length ; i++)
-         |      if (selectedElems[i].id == d.id)
-         |        return true;
-         |
-           |    return false;
-         |  });
-         |
-           |nodes
-         |  .attr('fill', null)
-         |  .attr('stroke', null);
-         |
-           |selectedNodes
-         |  .attr('fill', fdg.getFill)
-         |  .attr('stroke', fdg.getStroke);
-     """.stripMargin)
-
 
   private def initialize(): Unit = {
     try {
-      var outputCol = this.featuresCol
+      var outputCol = this.inputCol
       var tempDF: DataFrame = df.na.drop()
 
       var inputCols: Array[String] = this.inputCols match {
@@ -400,19 +320,9 @@ class VisualGNG (private var df: DataFrame) {
       }
 
       this.df = tempDF
-      this.featuresCol = outputCol
-      this.rdd = this.labelCol match {
-        case Some(col) => df
-          .select(this.featuresCol, col)
-          .rdd
-          .map{
-            case Row(f: SparkVector, l: Int) => Instance(new DenseVector(f.toArray), Some(l))
-            case Row(f: SparkVector, l: Double) => Instance(new DenseVector(f.toArray), Some(l.toInt))
-          }
-        case None => df
-          .select(this.featuresCol)
-          .rdd
-          .map{ case Row(f: SparkVector) => Instance(new DenseVector(f.toArray), None) }
+      this.inputCol = outputCol
+      this.rdd = df.select(this.inputCol) .rdd.map{
+        case Row(f: SparkVector) => new br.DenseVector(f.toArray)
       }
     }
     catch {
@@ -421,7 +331,7 @@ class VisualGNG (private var df: DataFrame) {
         new Alert(e.getMessage).elem.display()
     }
 
-    this.gng.setFeaturesCol(this.featuresCol)
+    this.gng.setInputCol(this.inputCol)
     this.featureSelect = new Select(this.featureNames)
       .setOnClickListener(s => {
         val i = this.featureNames.indexWhere(_ == s)
@@ -434,8 +344,9 @@ class VisualGNG (private var df: DataFrame) {
   }
 
   private def initResetTraining(): Unit = {
-    this.iterationCounter = 0
-    this.model = this.gng.modelInitializer(this.rdd)
+    this.epochs = 0
+    this.accTime = .0
+    this.model = GNGModel.createModel(this.rdd)
 
     updateGraph()
     updateStats()
@@ -459,10 +370,10 @@ class VisualGNG (private var df: DataFrame) {
             <span class="glyphicon glyphicon-cog"></span>
           </button>
           <ul class="dropdown-menu" style="padding: 5px" role="menu">
-            <li class="dropdown-header">Max iterations
-              <span class="glyphicon glyphicon-info-sign" title="Maximum number of iterations (input signals)"></span>
+            <li class="dropdown-header">Max epochs
+              <span class="glyphicon glyphicon-info-sign" title="Maximum number of epochs (passes over the whole dataset)"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ maxIterInput.elem }</li>
+            <li onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
 
             <li class="dropdown-header">Max nodes
               <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>
@@ -499,6 +410,11 @@ class VisualGNG (private var df: DataFrame) {
             </li>
             <li onclick="event.stopPropagation();">{ dInput.elem }</li>
 
+            <li class="dropdown-header">Untangle
+              <span class="glyphicon glyphicon-info-sign" title="Constrain the creation of edges"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ untangleInput.elem }</li>
+
             <li class="divider"></li>
             <li class="text-center">{ applyButton.elem }</li>
           </ul>
@@ -529,22 +445,19 @@ class VisualGNG (private var df: DataFrame) {
     * */
   private def run(): Unit = {
     this.rdd.persist()
-    var t = .0
-    var epoch = 0
+    val fitFunc = gng.fit(rdd) _
 
     try {
       while (this.isTraining) {
         /** Sampler (S). */
-        val sample = rdd.takeSample(withReplacement = true, num = gng.getLambda, seed = this.iterationCounter)
+//        val sample = rdd.takeSample(withReplacement = true, gng.getLambda, this.iterationCounter)
 
-        t += Utils.performance {
+        accTime += Utils.performance {
           /** Optimizer (O). */
-          this.model = gng.fit(sample, this.model)
+          this.model = fitFunc(this.model)
         }
 
-        // iterations are the number of seen signals.
-        this.iterationCounter += gng.getLambda
-        epoch += 1
+        epochs += 1
 
         /** Report learning state (El). */
         updateStats()
@@ -553,9 +466,12 @@ class VisualGNG (private var df: DataFrame) {
         updateGraph()
 
         /** Wait at least .1 seconds. Otherwise updates are too fast for user involvement. */
-        if (t / epoch < .1) Thread.sleep(((.1 - (t / epoch)) * 1000).toLong)
+        val meanTime = accTime / epochs.toDouble
+        if (meanTime < .1) {
+          Thread.sleep(((.1 - meanTime) * 1000).toLong)
+        }
 
-        if (this.iterationCounter >= this.maxIterations) {
+        if (this.epochs >= this.maxEpochs) {
           this.isTraining = false
           executionButton.set("Done")
         }
@@ -572,11 +488,11 @@ class VisualGNG (private var df: DataFrame) {
     * Updates execution stats shown to the user.
     * */
   private def updateStats(): Unit = {
-    val percentage = (this.iterationCounter / this.maxIterations.toDouble) * 100
-    var str = "Iteration: " + "%05d".format(this.iterationCounter)
-    str += " (%03d".format(percentage.toInt) + "%)"
-    str += " | Nodes: " + "%03d".format(this.model.getNodes.size)
-    str += " | Edges: " + "%04d".format(this.model.getEdges.size)
+    val meanTime = accTime / epochs.toDouble
+    var str = "Epochs: " + "%03d".format(this.epochs) + "/" + maxEpochs
+    str += f" ($meanTime%1.2f s/epoch)"
+    str += " | Nodes: " + "%03d".format(this.model.nodes.size)
+    str += " | Edges: " + "%04d".format(this.model.edges.size)
     this.statusText.set(str)
   }
 
@@ -584,17 +500,14 @@ class VisualGNG (private var df: DataFrame) {
   /**
     * Updates the force directed graph with the current state of the GNG model.
     * */
-  private def updateGraph(
-                           minRadius: Int = 5,
-                           maxRadius: Int = 15,
-                           maxEdgeDistance: Int = 50,
-                           colorByFeature: Int = 0
-                         ): Unit = {
+  private def updateGraph(): Unit = {
+    val nodes = this.model.nodes
+    val edges = this.model.edges
+    val maxRadius = fdg.maxNodeRadius
+    val minRadius = fdg.minNodeRadius
+    val maxEdgeDistance = fdg.maxEdgeDistance
 
-    val nodes = this.model.getNodes
-    val edges = this.model.getEdges
-
-    val distanceStats = edges.foldLeft(Stats())(_ + _.distance())
+    val distanceStats = edges.foldLeft(Stats())(_ + _.distance)
     val counterStats = nodes.foldLeft(Stats())(_ + _.winCounter)
     val featureStats = nodes.foldLeft(Stats())(_ + _.prototype(this.selectedFeature))
 
@@ -602,7 +515,7 @@ class VisualGNG (private var df: DataFrame) {
       Utils.scale(counterStats.min, counterStats.max)(0, maxRadius - minRadius)(n.winCounter) + minRadius
 
     val edgeDistance: Edge => Double = e =>
-      Utils.scale(distanceStats.min , distanceStats.max)(0, maxEdgeDistance)(e.distance(false))
+      Utils.scale(distanceStats.min , distanceStats.max)(0, maxEdgeDistance)(e.distance)
 
     val toHSL = Utils.spenceHSL(featureStats) _
 
@@ -644,7 +557,7 @@ class VisualGNG (private var df: DataFrame) {
   def parallelCoordinates(): Unit = {
     if (!pc.isDisplayed) {
       val rddVectors = this.df
-        .select(this.featuresCol)
+        .select(this.inputCol)
         .rdd
         .map{ case Row(vec: SparkVector) => mllib.linalg.Vectors.fromML(vec) }
 
@@ -654,17 +567,17 @@ class VisualGNG (private var df: DataFrame) {
     }
 
     pc.display()
+    fdg.addListener(pc.id)
+    pc.addListener(fdg.id)
+    updateGraph()
   }
 
 
   /**
     * Returns a DataFrame with each data point assigned to its closest unit.
-    *
-    * @param withDistance Whether the distance from a data point and its closest unit
-    *                     should be computed and added to the resulting DataFrame.
     * */
-  def getPredictions(withDistance: Boolean = false): DataFrame =
-    this.model.transform(df, withDistance = withDistance)
+  def getPredictions: Dataset[_] =
+    this.model.transform(df)
 
 
   /**
@@ -675,7 +588,7 @@ class VisualGNG (private var df: DataFrame) {
     * @return K-Means model fitted to the graph nodes.
     * */
   def kmeans(k: Int): KMeansModel = {
-    val nodes = this.model.getNodes
+    val nodes = this.model.nodes
     val nodesInstances = nodes.zipWithIndex
       .map{ case (n, i) => NodeSchema(i, Vectors.dense(n.prototype.toArray)) }
 
@@ -708,13 +621,13 @@ class VisualGNG (private var df: DataFrame) {
     * Computes a full count of data points per unit and updates the graph.
     * */
   def computeDensity(): this.type = {
-    val counts = getPredictions()
-      .groupBy(model.getPredictionCol)
+    val counts = getPredictions
+      .groupBy(model.getOutputCol)
       .count()
       .collect()
       .map(row => (row.getInt(0), row.getLong(1)))
 
-    this.model.getNodes.zipWithIndex.foreach{ case (n, i) =>
+    this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
       counts.find(_._1 == i) match {
         case Some((_, count)) => n.winCounter = count
         case None => n.winCounter = 0
@@ -728,3 +641,12 @@ class VisualGNG (private var df: DataFrame) {
 }
 
 private case class NodeSchema(id: Int, centroid: SparkVector)
+
+object VisualGNG {
+  private var nextId = 0
+
+  def apply(df: DataFrame): VisualGNG = {
+    nextId += 1
+    new VisualGNG(nextId, df)
+  }
+}
