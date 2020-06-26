@@ -8,22 +8,7 @@ import se.his.sail.Utils._
 
 import scala.xml.Elem
 
-class ParallelCoordinates private (val id: String) {
-
-  /**
-    * ID of the HTML element where data is to be "dropped".
-    * */
-  private val dataBucketId = id + "_bucket"
-
-  /**
-    * HTML element where data is to be "dropped".
-    * */
-  private val dataBucket =
-    <div id={dataBucketId} style="display:none;">
-      {{{{{dataBucketId}}}}}
-    </div>.model(dataBucketId, "")
-
-  this.dataBucket.display()
+class ParallelCoordinates private (val id: String, val dataHub: DataHub) {
 
   private var featureNames: Array[String] = Array.empty
 
@@ -85,7 +70,8 @@ class ParallelCoordinates private (val id: String) {
       s"""
          |var $id = new ParallelCoordinates('$id');
          |$id.setFeatures($features);
-         |${this.id}.watchBucket('$dataBucketId');
+         |$id.listen(${dataHub.id});
+         |${dataHub.id}.notify($id);
          |""".stripMargin)
 
     this.displayed = true
@@ -94,12 +80,6 @@ class ParallelCoordinates private (val id: String) {
       <svg id={this.id}></svg>
       <script> { script } </script>
     </div>
-  }
-
-  def addListener(elem: String): this.type = {
-    val js = new ScriptText(s"$id.addListener($elem);")
-    <script>{ js }</script>.display()
-    this
   }
 
   /**
@@ -113,7 +93,7 @@ class ParallelCoordinates private (val id: String) {
 }
 
 object ParallelCoordinates {
-  private var idCounter = 0
+  private var idCounter = -1
 
   private def initialize(): Unit = {
     val script = Utils.getResource("js/pc.js").getLines().mkString("\n")
@@ -121,10 +101,12 @@ object ParallelCoordinates {
   }
 
   def apply(): ParallelCoordinates = {
-    if (idCounter == 0) {
-      initialize()
-    }
-    new ParallelCoordinates(this.nextId)
+    apply(DataHub())
+  }
+
+  def apply(hub: DataHub): ParallelCoordinates = {
+    if (idCounter < 0) { initialize() }
+    new ParallelCoordinates(this.nextId, hub)
   }
 
   /**

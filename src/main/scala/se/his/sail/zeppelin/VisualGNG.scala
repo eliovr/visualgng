@@ -40,9 +40,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   var model: GNGModel = _
 
-  private val pc: ParallelCoordinates = ParallelCoordinates()
+  private val dataHub: DataHub = DataHub()
+  private val pc: ParallelCoordinates = ParallelCoordinates(dataHub)
+  private val fdg: ForceDirectedGraph = ForceDirectedGraph(dataHub)
 
-  private val fdg: ForceDirectedGraph = ForceDirectedGraph()
+  def getSelected: String = this.dataHub.get
 
 
   // ------------- process variables -------------
@@ -561,15 +563,14 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .rdd
         .map{ case Row(vec: SparkVector) => mllib.linalg.Vectors.fromML(vec) }
 
-      pc
-        .setFeatureNames(this.featureNames)
+      pc.setFeatureNames(this.featureNames)
         .setStats(mllib.stat.Statistics.colStats(rddVectors))
     }
 
     pc.display()
-    fdg.addListener(pc.id)
-    pc.addListener(fdg.id)
-    updateGraph()
+//    fdg.addListener(pc.id)
+//    pc.addListener(fdg.id)
+//    updateGraph()
   }
 
 

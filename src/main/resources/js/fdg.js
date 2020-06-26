@@ -1,12 +1,13 @@
 class ForceDirectedGraph {
   constructor(elem_id, width, height) {
+    this.id = elem_id;
     this.svg = d3.select('#' + elem_id);
 
     this.nodes = null;
+    this.datahub = null;
 
     this.selectedCounter = 0;
     this.cat10 = d3.scale.category10().domain(d3.range(10));
-    this.listeners = [];
 
     this.withImages = false;
     this.displayHint = false;
@@ -91,25 +92,19 @@ class ForceDirectedGraph {
 
     function onMouseover(d) {
         if (self.selectedCounter > 0 && !d.selected)
-            d3.select(this).style('opacity', null)
+          d3.select(this).style('opacity', null);
 
-        for (var i = 0; i < self.listeners.length; i++) {
-          let listener = self.listeners[i];
-          if (typeof listener.hearMouseover != 'undefined') {
-            listener.hearMouseover(d, self);
-          }
+        if (self.datahub != null && typeof self.datahub != 'undefined') {
+          self.datahub.notifyMouseover(d, self);
         }
     }
 
     function onMouseout(d) {
         if (!d.selected && self.selectedCounter > 0)
-            d3.select(this).style('opacity', .5)
+          d3.select(this).style('opacity', .5);
 
-        for (var i = 0; i < self.listeners.length; i++) {
-          let listener = self.listeners[i];
-          if (typeof listener.hearMouseout != 'undefined') {
-            listener.hearMouseout(d, self);
-          }
+        if (self.datahub != null && typeof self.datahub != 'undefined') {
+          self.datahub.notifyMouseout(d, self);
         }
     }
 
@@ -127,11 +122,8 @@ class ForceDirectedGraph {
             self.getNodes().style('opacity', null);
         }
 
-        for (var i = 0; i < self.listeners.length; i++) {
-          let listener = self.listeners[i];
-          if (typeof listener.hearClick != 'undefined') {
-            listener.hearClick(d, self);
-          }
+        if (self.datahub != null && typeof self.datahub != 'undefined') {
+          self.datahub.notifyMouseclick(d, self);
         }
     }
 
@@ -215,12 +207,12 @@ class ForceDirectedGraph {
       .start();
 
     // trigger listeners' update.
-    for (var i = 0; i < self.listeners.length; i++) {
-      let listener = self.listeners[i];
-      if (typeof listener.hearUpdate != 'undefined') {
-        listener.hearUpdate(newNodes);
-      }
-    }
+    // for (var i = 0; i < self.listeners.length; i++) {
+    //   let listener = self.listeners[i];
+    //   if (typeof listener.hearUpdate != 'undefined') {
+    //     listener.hearUpdate(newNodes);
+    //   }
+    // }
   }
 
   linkStrokeWidth(d) {
@@ -293,7 +285,11 @@ class ForceDirectedGraph {
     });
   }
 
-  hearSelected(selectedElems, caller) {
+  listenUpdate(data) {
+    this.setData(data.nodes, data.links);
+  }
+
+  listenSelected(selectedElems, caller) {
     let self = this;
     let nodes = self.getNodes();
     let data = selectedElems.data();
@@ -318,7 +314,8 @@ class ForceDirectedGraph {
       // .attr('stroke', (d) => self.nodeStroke(d));
   }
 
-  addListener(listener) {
-    this.listeners.push(listener);
+  listen(hub) {
+    this.datahub = hub;
+    return this;
   }
 }

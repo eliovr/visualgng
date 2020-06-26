@@ -7,7 +7,7 @@ import se.his.sail.Utils
 import scala.collection.mutable
 import scala.xml.Elem
 
-class ForceDirectedGraph private (val id: String) {
+class ForceDirectedGraph private (val id: String, val dataHub: DataHub) {
 
   var height: Int = 600
   var width: Int = 600
@@ -16,25 +16,14 @@ class ForceDirectedGraph private (val id: String) {
   var maxEdgeDistance: Int = 50
 
   /**
-    * Id for the HTML element where data is to be "dropped".
-    * */
-  private val dataBucketId = s"${id}_bucket"
-
-  private val dataBucket =
-    <div id={dataBucketId} style="display:none;">
-      {{{{{dataBucketId}}}}}
-    </div>.model(dataBucketId, "")
-
-  this.dataBucket.display()
-
-  /**
     * The HTML force directed graph element.
     * */
   lazy val elem: Elem = {
     val script = new ScriptText(
       s"""
          |var $id = new ForceDirectedGraph('$id', $width, $height);
-         |${this.id}.watchBucket('$dataBucketId');
+         |$id.listen(${dataHub.id});
+         |${dataHub.id}.notify($id);
          |""".stripMargin)
 
     <div style={s"min-width: ${width}px;"}>
@@ -52,21 +41,13 @@ class ForceDirectedGraph private (val id: String) {
     val jsonEdges = edges.mkString("[", ",", "]")
     val data = s"""{"nodes": $jsonNodes, "links": $jsonEdges}"""
 
-    // push data to the html bucket element
-    this.dataBucket.model(this.dataBucketId, data)
+    dataHub.put(data)
     this
   }
-
-  def addListener(elem: String): this.type = {
-    val js = new ScriptText(s"$id.addListener($elem);")
-    <script>{ js }</script>.display()
-    this
-  }
-
 }
 
 object ForceDirectedGraph {
-  private var idCounter = 0
+  private var idCounter = -1
 
   private def initialize(): Unit = {
     val script = Utils.getResource("js/fdg.js").getLines().mkString("\n")
@@ -82,10 +63,12 @@ object ForceDirectedGraph {
   }
 
   def apply(): ForceDirectedGraph = {
-    if (idCounter == 0) {
-      initialize()
-    }
-    new ForceDirectedGraph(this.nextId)
+    this.apply(DataHub())
+  }
+
+  def apply(hub: DataHub): ForceDirectedGraph = {
+    if (idCounter < 0) { initialize() }
+    new ForceDirectedGraph(this.nextId, hub)
   }
 }
 
