@@ -302,24 +302,24 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .fit(tempDF).transform(tempDF)
       }
 
-      if (this.labelCol.nonEmpty) {
-        schemaFields.find(_.name == this.labelCol.get) match {
-          case Some(sf) if sf.dataType == StringType =>
-            this.labelCol = Some(sf.name + "_indexed")
-            val siModel = new StringIndexer()
-              .setInputCol(sf.name)
-              .setOutputCol(this.labelCol.get)
-              .fit(tempDF)
-
-            tempDF = siModel.transform(tempDF)
-            this.indexedLabels = siModel.labels
-          case Some(sf) if sf.dataType == IntegerType || sf.dataType == DoubleType =>
-          case _ =>
-            this.labelCol = None
-            new Alert("labelCol not found or unsupported data type").elem.display()
-        }
-
-      }
+//      if (this.labelCol.nonEmpty) {
+//        schemaFields.find(_.name == this.labelCol.get) match {
+//          case Some(sf) if sf.dataType == StringType =>
+//            this.labelCol = Some(sf.name + "_indexed")
+//            val siModel = new StringIndexer()
+//              .setInputCol(sf.name)
+//              .setOutputCol(this.labelCol.get)
+//              .fit(tempDF)
+//
+//            tempDF = siModel.transform(tempDF)
+//            this.indexedLabels = siModel.labels
+//          case Some(sf) if sf.dataType == IntegerType || sf.dataType == DoubleType =>
+//          case _ =>
+//            this.labelCol = None
+//            new Alert("labelCol not found or unsupported data type").elem.display()
+//        }
+//
+//      }
 
       this.df = tempDF
       this.inputCol = outputCol
@@ -348,7 +348,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   private def initResetTraining(): Unit = {
     this.epochs = 0
     this.accTime = .0
-    this.model = GNGModel.createModel(this.rdd)
+    this.model = GNGModel(this.rdd)
 
     updateGraph()
     updateStats()
@@ -524,7 +524,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     val graphNodes = nodes.map( n => {
       val radius = nodeRadius(n)
       val (hue, saturation, lightness) = toHSL(n.prototype(this.selectedFeature))
-      val hint =  s"id: ${n.id} | count: ${Utils.toShortString(n.winCounter)}"
+//      val hint =  s"id: ${n.id} | count: ${Utils.toShortString(n.winCounter)}"
+      val count =  Utils.toShortString(n.winCounter)
 
       val gn = new GraphNode(n.id)
         .setRadius(radius)
@@ -532,14 +533,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .setData(n.prototype.toArray.mkString("[", ",", "]"))
 
       n.label match {
-        case Some(l) =>
-          gn.setGroup(l)
-          if (this.indexedLabels.isEmpty) gn.setHint(hint + s" | label: $l")
-          else gn.setHint(hint + s" | label: ${this.indexedLabels(l)}")
-        case None => gn.setHint(hint)
+        case Some(l) =>  gn.setHint(s"$l")
+        case None => gn
       }
-
-      gn
     })
 
     val graphEdges = edges.map(e => {
@@ -562,23 +558,83 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .select(this.inputCol)
         .rdd
         .map{ case Row(vec: SparkVector) => mllib.linalg.Vectors.fromML(vec) }
-
+                                                                                                                                    
       pc.setFeatureNames(this.featureNames)
         .setStats(mllib.stat.Statistics.colStats(rddVectors))
     }
 
     pc.display()
-//    fdg.addListener(pc.id)
-//    pc.addListener(fdg.id)
-//    updateGraph()
   }
 
 
   /**
     * Returns a DataFrame with each data point assigned to its closest unit.
     * */
-  def getPredictions: Dataset[_] =
-    this.model.transform(df)
+  def transform(showStats: Boolean = false): Dataset[_] = {
+    val dataset = this.model.transform(df)
+
+    if (showStats) {
+      import org.apache.spark.sql.functions._
+      import spark.implicits._
+
+      val stats: Array[(Int, Long, String)] = this.labelCol match {
+        case Some(label) =>
+          dataset
+            .groupBy(model.outputCol)
+            .agg(collect_list(label))
+            .map{
+              case Row(unitId: Int, labels: Seq[_]) =>
+                val label = labels
+                  .groupBy(identity)
+                  .maxBy(_._2.size)._1
+                (unitId, labels.size.toLong, label.toString)
+            }
+            .collect()
+        case None =>
+          dataset
+            .groupBy(model.getOutputCol)
+            .count()
+            .map(row => (row.getInt(0), row.getLong(1), ""))
+            .collect()
+      }
+
+      this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
+        stats.find(_._1 == i) match {
+          case Some((_, count, label)) =>
+            n.winCounter = count
+            if (label.nonEmpty)
+              n.setLabel(label)
+          case None =>
+            n.winCounter = 0
+        }
+      }
+
+      updateGraph()
+    }
+
+    dataset
+  }
+
+  /**
+    * Computes a full count of data points per unit and updates the graph.
+    * */
+//  def computeDensity(): this.type = {
+//    val counts = this.transform
+//      .groupBy(model.getOutputCol)
+//      .count()
+//      .collect()
+//      .map(row => (row.getInt(0), row.getLong(1)))
+//
+//    this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
+//      counts.find(_._1 == i) match {
+//        case Some((_, count)) => n.winCounter = count
+//        case None => n.winCounter = 0
+//      }
+//    }
+//
+//    updateGraph()
+//    this
+//  }
 
 
   /**
@@ -609,34 +665,13 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         val cluster = row.getAs[Int]("prediction")
 
         nodes.zipWithIndex.find(_._2 == id) match {
-          case Some((n, _)) => n.setLabel(cluster)
+          case Some((n, _)) => n.setLabel(cluster.toString)
           case None =>
         }
       })
 
     updateGraph()
     kmModel
-  }
-
-  /**
-    * Computes a full count of data points per unit and updates the graph.
-    * */
-  def computeDensity(): this.type = {
-    val counts = getPredictions
-      .groupBy(model.getOutputCol)
-      .count()
-      .collect()
-      .map(row => (row.getInt(0), row.getLong(1)))
-
-    this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
-      counts.find(_._1 == i) match {
-        case Some((_, count)) => n.winCounter = count
-        case None => n.winCounter = 0
-      }
-    }
-
-    updateGraph()
-    this
   }
 
 }

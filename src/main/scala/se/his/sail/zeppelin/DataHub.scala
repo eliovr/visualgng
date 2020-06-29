@@ -4,9 +4,6 @@ import org.apache.zeppelin.display.angular.notebookscope._
 import AngularElem._
 import se.his.sail.Utils
 
-import scala.collection.mutable.ArrayBuffer
-import scala.xml.Elem
-
 class DataHub private (val id: String) {
   private val inputBucketId = s"${id}_input_bucket"
   private val inputBucket =
@@ -42,20 +39,21 @@ class DataHub private (val id: String) {
 
   def get: String = {
     AngularModel(outputBucketId)().asInstanceOf[String]
-//    this.inputBucket.model().asInstanceOf[String]
   }
 }
 
 object DataHub {
   private var idCounter: Int = -1
+  private val resource: String = "js/datahub.js"
+  private val prefix: String = "hub"
 
   private def nextId: String = {
     this.idCounter += 1
-    s"hub_$idCounter"
+    prefix + "_" + idCounter
   }
 
   private def initialize(): Unit = {
-    val script = Utils.getResource("js/datahub.js").getLines().mkString("\n")
+    val script = Utils.getResource(resource).getLines().mkString("\n")
     <script> { new ScriptText(script) } </script>.display()
   }
 

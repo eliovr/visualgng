@@ -115,17 +115,6 @@ object Utils {
 
     javax.imageio.ImageIO.write(image, format, new java.io.File(saveTo))
   }
-
-  implicit def sourceAsWrappedSource(source: Source): WrappedSource = new WrappedSource(source)
-}
-
-
-private [sail] class WrappedSource (val source: Source) {
-  def format(values: Map[String, Any]): String = {
-    var str = source.getLines().mkString("\n")
-    values.foreach{case (k, v) => str = str.replace(k, v.toString)}
-    str
-  }
 }
 
 case class Stats(

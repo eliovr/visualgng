@@ -71,7 +71,7 @@ class DataHub {
   }
 
   notifySelected(selectedElems, caller) {
-    this.selected = selectedElems;
+    this.selected = selectedElems || [];
 
     for (var i = 0; i < this.listeners.length; i++) {
       const listener = this.listeners[i];

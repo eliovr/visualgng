@@ -1,7 +1,14 @@
 class ForceDirectedGraph {
   constructor(elem_id, width, height) {
     this.id = elem_id;
-    this.svg = d3.select('#' + elem_id);
+    this.width = width;
+    this.height = height;
+
+    this.svg = d3.select('#' + elem_id)
+      .attr('width', width)
+      .attr('height', height);
+
+    this.canvas = this.svg.append('g');
 
     this.nodes = null;
     this.datahub = null;
@@ -10,7 +17,7 @@ class ForceDirectedGraph {
     this.cat10 = d3.scale.category10().domain(d3.range(10));
 
     this.withImages = false;
-    this.displayHint = false;
+    this.displayHint = true;
 
     this.minNodeRadius = 5;
     this.maxNodeRadius = 15;
@@ -20,39 +27,47 @@ class ForceDirectedGraph {
 
     this.distance = 100;
     this.charge = -70;
-    this.width = width;
-    this.height = height;
     this.force = d3.layout.force()
         .gravity(.08)
         .distance(this.distance)
         .charge(this.charge)
         .size([width, height]);
 
-    this.svg
-      .attr('width', width)
-      .attr('height', height);
-
-    this.svg.append('g')
+    this.canvas.append('g')
       .attr('class', 'links')
       .attr('stroke-width', .5)
       .attr('stroke-opacity', .5)
       .attr('stroke', 'black');
 
-    this.svg.append('g')
+    this.canvas.append('g')
       .attr('class', 'nodes')
       .attr('stroke', 'white')
       .attr('stroke-width', 1.5)
       .attr('fill', 'gray');
+
+    this.svg.call(d3.behavior.zoom()
+      .on("zoom", () => {
+        let velocity = 1/10;
+        let scale =  Math.pow(d3.event.scale, velocity);
+        let ty = (height - (height * scale))/2;
+        let tx = (width - (width * scale))/2;
+        this.canvas
+          .attr("transform", "translate(" + [ty,tx] + ")scale(" + scale + ")");
+      }))
+      .on("mousedown.zoom", null)
+      .on("touchstart.zoom", null)
+      .on("touchmove.zoom", null)
+      .on("touchend.zoom", null);
   }
 
   getNodes() {
-    return this.svg
+    return this.canvas
       .select('g.nodes')
       .selectAll('g.node');
   }
 
   getLinks() {
-    return this.svg
+    return this.canvas
       .select('g.links')
       .selectAll('line');
   }
@@ -165,18 +180,18 @@ class ForceDirectedGraph {
     // update.
     nodes.style('opacity', (d) => self.nodeOpacity(d));
     if (self.withImages) {
-      nodes.selectAll("image")
+      nodes.select("image")
         .attr("xlink:href", (d) => self.nodeImage(d))
         .attr("width", self.imageWidth);
     } else {
-      nodes.selectAll('circle')
+      nodes.select('circle')
         .attr('r', (d) => self.nodeRadius(d))
         .attr('stroke', (d) => self.nodeStroke(d))
         .attr('fill', (d) => self.nodeFill(d));
     }
 
     if (self.displayHint) {
-      nodes.selectAll('text').text((d) => self.nodeHint(d));
+      nodes.select('text').text((d) => self.nodeHint(d));
     }
 
     if (self.selectedCounter > 0)
@@ -197,22 +212,14 @@ class ForceDirectedGraph {
             .attr('x2', (d) => { return d.target.x; })
             .attr('y2', (d) => { return d.target.y; });
 
-        // nodes.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
-        nodes.attr('transform', function (d) {
-          let x = Math.max(d.radius, Math.min(self.width - d.radius, d.x));
-          let y = Math.max(d.radius, Math.min(self.height - d.radius, d.y));
-          return "translate(" + x + "," + y + ")";
-        });
+        nodes.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+        // nodes.attr('transform', function (d) {
+        //   let x = Math.max(d.radius, Math.min(self.width - d.radius, d.x));
+        //   let y = Math.max(d.radius, Math.min(self.height - d.radius, d.y));
+        //   return "translate(" + x + "," + y + ")";
+        // });
       })
       .start();
-
-    // trigger listeners' update.
-    // for (var i = 0; i < self.listeners.length; i++) {
-    //   let listener = self.listeners[i];
-    //   if (typeof listener.hearUpdate != 'undefined') {
-    //     listener.hearUpdate(newNodes);
-    //   }
-    // }
   }
 
   linkStrokeWidth(d) {
@@ -302,16 +309,8 @@ class ForceDirectedGraph {
         return false;
       });
 
-    nodes
-      .style('opacity', .3);
-      // .attr('fill', null)
-      // .attr('stroke', null);
-
-
-    selectedNodes
-      .style('opacity', 1);
-      // .attr('fill', (d) => self.nodeFill(d))
-      // .attr('stroke', (d) => self.nodeStroke(d));
+    nodes.style('opacity', .3);
+    selectedNodes.style('opacity', 1);
   }
 
   listen(hub) {

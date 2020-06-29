@@ -16,9 +16,9 @@ class Node(
             var winCounter: Long = 0
           ) extends Serializable {
 
-  var label: Option[Int] = None
+  var label: Option[String] = None
 
-  def setLabel(label: Int): this.type = {
+  def setLabel(label: String): this.type = {
     this.label = Some(label)
     this
   }
@@ -81,9 +81,14 @@ class GNGModel private () extends Serializable {
   }
 
   def transform(ds: Dataset[_]): Dataset[_] = {
+//    val prototypes: br.DenseMatrix[Double] = br.DenseMatrix(nodes.map(_.prototype):_*)
     val classify = udf{(col: SparkVector) =>
       val vec = br.DenseVector(col.toArray)
-      nodes.minBy(_.distanceTo(vec)).id
+//      val diff: br.DenseMatrix[Double] = vec - prototypes(br.*, ::)
+//      br.argmin(br.norm(diff(br.*, ::)))
+
+      nodes.zipWithIndex.minBy{ case (n, _) => n.distanceTo(vec) }._2
+//      nodes.minBy(_.distanceTo(vec)).id
     }
 
     ds.withColumn(outputCol, classify(ds(inputCol)))
@@ -92,7 +97,7 @@ class GNGModel private () extends Serializable {
 
 
 object GNGModel {
-  def createModel(rdd: RDD[br.DenseVector[Double]]): GNGModel = {
+  def apply(rdd: RDD[br.DenseVector[Double]]): GNGModel = {
     val samples = rdd.takeSample(false, 2)
     val model = new GNGModel
     val a = model.createUnit(samples(0))
@@ -102,7 +107,7 @@ object GNGModel {
     model
   }
 
-  def createModel(samples: Seq[br.DenseVector[Double]]): GNGModel = {
+  def apply(samples: Seq[br.DenseVector[Double]]): GNGModel = {
     val size = samples.size
     val model = new GNGModel
     val a = model.createUnit(samples(size - 1))

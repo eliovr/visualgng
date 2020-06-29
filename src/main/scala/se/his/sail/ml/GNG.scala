@@ -108,9 +108,9 @@ class GNG private (
     model
   }
 
-  def fit(rdd: RDD[br.DenseVector[Double]])(model: GNGModel = GNGModel.createModel(rdd)): GNGModel = {
+  def fit(rdd: RDD[br.DenseVector[Double]])(model: GNGModel = GNGModel(rdd)): GNGModel = {
     val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
-    val reduceFit = GNG.fit(lambda, maxNodes, .5, eps_n, maxAge, alpha, d, k, moving, untangle) _
+    val reduceFit = GNG.fit(lambda, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
     val iterations = this.iterations
 
     val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
@@ -129,7 +129,7 @@ class GNG private (
     }.setInputCol(this.inputCol)
   }
 
-  def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel.createModel(arr)): GNGModel = {
+  def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel(arr)): GNGModel = {
     val fitFunc = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
     var m = model
     for (_ <- 0 until iterations) {
