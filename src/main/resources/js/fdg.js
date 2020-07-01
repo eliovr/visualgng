@@ -1,17 +1,11 @@
 class ForceDirectedGraph {
-  constructor(elem_id, width, height) {
+  constructor(elem_id, features) {
     this.id = elem_id;
-    this.width = width;
-    this.height = height;
-
-    this.svg = d3.select('#' + elem_id)
-      .attr('width', width)
-      .attr('height', height);
-
-    this.canvas = this.svg.append('g');
-
-    this.nodes = null;
     this.datahub = null;
+    this.nodesData = [];
+    this.linksData = [];
+    this.width = 600;
+    this.height = 600;
 
     this.selectedCounter = 0;
     this.cat10 = d3.scale.category10().domain(d3.range(10));
@@ -21,7 +15,11 @@ class ForceDirectedGraph {
 
     this.minNodeRadius = 5;
     this.maxNodeRadius = 15;
-    this.defaultLinkDistance = 50;
+
+    this.defaultLinkDistance = 30;
+    this.minLinkDistance = 0;
+    this.maxLinkDistance = 50;
+
     this.imageWidth = 30;
     this.hintFontSize = '14px';
 
@@ -31,7 +29,55 @@ class ForceDirectedGraph {
         .gravity(.08)
         .distance(this.distance)
         .charge(this.charge)
-        .size([width, height]);
+        .size([this.width, this.height]);
+
+    let container = d3.select('#' + elem_id)
+      .style({'min-height': this.height + 'px', 'min-width': this.width + 'px'});
+
+    this.controls = container
+      .append('div')
+      .attr('class', 'controls btn-group-btn')
+      .style({'position': 'relative', 'z-index': 10});
+
+    this.controls.append('button')
+      .attr('type', 'button')
+      .attr('class', 'btn btn-default dropdown-toggle btn-sm')
+      .attr('data-toggle', 'dropdown')
+      .append('span')
+        .text('Graph')
+        .attr('class', 'glyphicon glyphicon-cog');
+
+    this.controls = this.controls.append('ul')
+      .attr('class', 'dropdown-menu');
+
+    if (features) {
+      let options = [{'name': '-- Select --'}];
+      for (var i = 0; i < features.length; i++) {
+        options.push(features[i]);
+      }
+
+      let select = this.controls.append('li')
+        .attr('class', 'dropdown-header')
+        .text('Color by')
+        .append('select')
+        .attr('onclick', 'event.stopPropagation();')
+          .selectAll('option')
+          .data(options);
+
+      select.enter().append('option')
+        .attr('value', (d, i) => { return i; })
+        .text((d) => { return d.name; })
+        .on('click', (d, i) => {
+          this.datahub.setSelectedFeature(i-1);
+        });
+    }
+
+    this.svg = container.append('svg')
+      .attr('width', this.width)
+      .attr('height', this.height)
+      .style({'position': 'absolute', 'top': 0});
+
+    this.canvas = this.svg.append('g');
 
     this.canvas.append('g')
       .attr('class', 'links')
@@ -49,8 +95,8 @@ class ForceDirectedGraph {
       .on("zoom", () => {
         let velocity = 1/10;
         let scale =  Math.pow(d3.event.scale, velocity);
-        let ty = (height - (height * scale))/2;
-        let tx = (width - (width * scale))/2;
+        let ty = (this.height - (this.height * scale))/2;
+        let tx = (this.width - (this.width * scale))/2;
         this.canvas
           .attr("transform", "translate(" + [ty,tx] + ")scale(" + scale + ")");
       }))
@@ -72,28 +118,21 @@ class ForceDirectedGraph {
       .selectAll('line');
   }
 
-  setData(newNodes, newLinks) {
+  setData(data) {
+    this.enrichData(data);
+    this.nodesData = data.nodes;
+    this.linksData = data.links;
+
+    this.paint();
+  }
+
+  paint(runForce) {
     let self = this;
-    self.force.stop();
-
-    let oldNodes = self.getNodes().data();
-
-    for (let i = newNodes.length - 1; i >= 0; i--) {
-        let nn = newNodes[i];
-        let on = oldNodes.find(function (d) {
-            return d !== 'undefined' && nn.id == d.id;
-        });
-
-        if (on) {
-            newNodes[i].x = on.x;
-            newNodes[i].y = on.y;
-            newNodes[i].selected = on.selected;
-        }
-    }
+    let computeForce = typeof runForce == 'undefined' ? true : runForce;
 
     // ------------- links
 
-    let links = self.getLinks().data(newLinks);
+    let links = self.getLinks().data(self.linksData);
 
     // update
     links.style('stroke-width', (d) => self.linkStrokeWidth(d));
@@ -102,6 +141,7 @@ class ForceDirectedGraph {
     // create
     links.enter().append('line')
       .style('stroke-width', (d) => self.linkStrokeWidth(d));
+
 
     // ---------------- nodes
 
@@ -142,13 +182,34 @@ class ForceDirectedGraph {
         }
     }
 
-    let nodes = self.getNodes()
-      .data(newNodes, self.nodeId);
+    let nodes = self.getNodes().data(self.nodesData, this.nodeId);
 
-    // remove.
+    // remove nodes.
     nodes.exit().remove();
 
-    // create.
+    // update nodes.
+    nodes.style('opacity', (d) => self.nodeOpacity(d));
+    if (self.withImages) {
+      nodes.select("image")
+        .attr("xlink:href", (d) => self.nodeImage(d))
+        .attr("width", self.imageWidth);
+    } else {
+      nodes.select('circle')
+        .attr('r', (d) => self.nodeRadius(d))
+        .attr('stroke', (d) => self.nodeStroke(d))
+        .attr('fill', (d) => self.nodeFill(d));
+    }
+
+    if (self.displayHint) {
+      nodes.select('text').text((d) => self.nodeHint(d));
+    }
+
+    if (self.selectedCounter > 0)
+      nodes
+        .filter((d) => { return !d.selected; })
+        .style('opacity', '.3');
+
+    // create nodes.
     let createdNodes = nodes.enter().append("g")
       .attr("class", "node")
       .style('opacity', (d) => self.nodeOpacity(d))
@@ -177,60 +238,49 @@ class ForceDirectedGraph {
         .text((d) => self.nodeHint(d));
     }
 
-    // update.
-    nodes.style('opacity', (d) => self.nodeOpacity(d));
-    if (self.withImages) {
-      nodes.select("image")
-        .attr("xlink:href", (d) => self.nodeImage(d))
-        .attr("width", self.imageWidth);
-    } else {
-      nodes.select('circle')
-        .attr('r', (d) => self.nodeRadius(d))
-        .attr('stroke', (d) => self.nodeStroke(d))
-        .attr('fill', (d) => self.nodeFill(d));
+    // ------------- force-directed placement.
+
+    if (computeForce) {
+      let minDistance = Number.MAX_SAFE_INTEGER;
+      let maxDistance = Number.MIN_SAFE_INTEGER;
+
+      for (var i = 0; i < self.linksData.length; i++) {
+        const d = self.linksData[i].distance;
+        minDistance = Math.min(d, minDistance);
+        maxDistance = Math.max(d, maxDistance);
+      }
+
+      let distanceScaler = d3.scale.linear()
+        .domain([minDistance, maxDistance])
+        .range([self.minLinkDistance, self.maxLinkDistance]);
+
+      self.force
+        .nodes(self.nodesData)
+        .links(self.linksData)
+        .linkDistance((d) => self.linkDistance(d, distanceScaler))
+        .alpha(.05)
+        .on('tick', (t) => {
+          links
+              .attr('x1', (d) => { return d.source.x; })
+              .attr('y1', (d) => { return d.source.y; })
+              .attr('x2', (d) => { return d.target.x; })
+              .attr('y2', (d) => { return d.target.y; });
+
+          nodes.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+        })
+        .start();
     }
-
-    if (self.displayHint) {
-      nodes.select('text').text((d) => self.nodeHint(d));
-    }
-
-    if (self.selectedCounter > 0)
-      nodes
-        .filter((d) => { return !d.selected; })
-        .style('opacity', '.3')
-
-    // force-directed placement.
-    self.force
-      .nodes(newNodes)
-      .links(newLinks)
-      .linkDistance((d) => self.linkDistance(d))
-      .alpha(.05)
-      .on('tick', (t) => {
-        links
-            .attr('x1', (d) => { return d.source.x; })
-            .attr('y1', (d) => { return d.source.y; })
-            .attr('x2', (d) => { return d.target.x; })
-            .attr('y2', (d) => { return d.target.y; });
-
-        nodes.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
-        // nodes.attr('transform', function (d) {
-        //   let x = Math.max(d.radius, Math.min(self.width - d.radius, d.x));
-        //   let y = Math.max(d.radius, Math.min(self.height - d.radius, d.y));
-        //   return "translate(" + x + "," + y + ")";
-        // });
-      })
-      .start();
   }
 
   linkStrokeWidth(d) {
     return d.width || null;
   }
 
-  linkDistance(d) {
+  linkDistance(d, scaler) {
     let dist = d.distance || this.defaultLinkDistance;
     let sr = d.source.radius || this.minNodeRadius;
     let tr = d.target.radius || this.minNodeRadius;
-    return dist + sr + tr;
+    return scaler(dist) + sr + tr;
   }
 
   nodeId(d) {
@@ -238,12 +288,12 @@ class ForceDirectedGraph {
   }
 
   nodeRadius(d) {
-    return d.radius || self.minNodeRadius;
+    return d.radius || this.minNodeRadius;
   }
 
   nodeFill(d) {
     if (typeof d.hsl != 'undefined') {
-      return d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
+      return d.hsl; //d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
     } else if (typeof d.fill != 'undefined' && d.fill >= 0) {
       return d3.hsl(d.fill, 1, 0.5);
     } else {
@@ -273,6 +323,67 @@ class ForceDirectedGraph {
     return d.img || null;
   }
 
+  enrichData(data) {
+    let nodes = data.nodes;
+    let links = data.links;
+    let oldNodes = this.getNodes().data();
+    let stats = {
+      'min': Number.MAX_SAFE_INTEGER,
+      'max': Number.MIN_SAFE_INTEGER
+    }
+
+    // ---- Nodes position.
+
+    for (let i = nodes.length - 1; i >= 0; i--) {
+        let n = nodes[i];
+        let o = oldNodes.find((d) => {
+            return d !== 'undefined' && n.id == d.id;
+        });
+
+        if (o) {
+            n.x = o.x;
+            n.y = o.y;
+            n.selected = o.selected;
+        }
+
+        stats.min = Math.min(stats.min, n.density);
+        stats.max = Math.max(stats.max, n.density);
+    }
+
+    // ---- Nodes size.
+
+    let scaler = d3.scale.linear()
+      .domain([stats.min, stats.max])
+      .range([this.minNodeRadius, this.maxNodeRadius]);
+
+    for (var i = 0; i < nodes.length; i++) {
+      const d = nodes[i];
+      d.radius = scaler(d.density);
+    }
+
+    // ---- Links distance.
+
+    stats = {
+      'min': Number.MAX_SAFE_INTEGER,
+      'max': Number.MIN_SAFE_INTEGER
+    }
+
+    for (var i = 0; i < links.length; i++) {
+      let x = links[i].distance;
+      stats.min = Math.min(stats.min, x);
+      stats.max = Math.max(stats.max, x);
+    }
+
+    scaler = d3.scale.linear()
+      .domain([stats.min, stats.max])
+      .range([this.minLinkDistance, this.maxLinkDistance]);
+
+    for (var i = 0; i < links.length; i++) {
+      const d = links[i];
+      d.distance = scaler(d.distance);
+    }
+  }
+
   watchBucket(bucket_id) {
     let self = this;
     let bucket = document.getElementById(bucket_id);
@@ -293,7 +404,12 @@ class ForceDirectedGraph {
   }
 
   listenUpdate(data) {
-    this.setData(data.nodes, data.links);
+    if ('nodes' in data && 'links' in data) {
+      this.setData(data);
+    } else {
+      console.warn("Data has no attribute 'nodes' or 'links'.");
+    }
+
   }
 
   listenSelected(selectedElems, caller) {

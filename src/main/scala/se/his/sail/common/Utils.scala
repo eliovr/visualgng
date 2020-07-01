@@ -1,4 +1,4 @@
-package se.his.sail
+package se.his.sail.common
 
 import java.awt.image.BufferedImage
 
@@ -49,30 +49,6 @@ object Utils {
     (System.nanoTime() - start) / 1000000000
   }
 
-  def spenceHSL(stats: Stats)(x: Double): (Double, Double, Double) = {
-    val lightness = .78 - scale(stats.min, stats.max)(.59, .78)(x) + .59
-
-    val saturation =
-      if (stats.min >= 0) {
-        val avg = stats.avg
-        if (x > avg)
-          scale(avg, stats.max)(0, .95)(x)
-        else
-          scale(0, avg - stats.min)(0, .95)(avg - x)
-      }
-      else if (x < 0)
-        scale(0, stats.min.abs)(0, .95)(x.abs)
-      else
-        scale(0, stats.max)(0, .95)(x)
-
-    val hue =
-      if (x < stats.avg) 346
-      else if (x > stats.avg) 34
-      else 0
-
-    (hue, saturation, lightness)
-  }
-
   /***
     * Retrieve a file from the "resource" folder in the project.
     */
@@ -117,17 +93,3 @@ object Utils {
   }
 }
 
-case class Stats(
-             count: Long = 1,
-             sum: Double = 0,
-             min: Double = Double.MaxValue,
-             max: Double = Double.MinValue) extends Serializable {
-
-  def +(other: Stats): Stats = other match {
-    case Stats(_, s, mn, mx) => Stats(count + 1, sum + s, mn.min(min), mx.max(max))
-  }
-
-  def +(x: Double): Stats = Stats(count + 1, sum + x, x.min(min), x.max(max))
-
-  def avg: Double = sum / count
-}

@@ -2,32 +2,35 @@ package se.his.sail.zeppelin
 
 import org.apache.zeppelin.display.angular.notebookscope._
 import AngularElem._
-import se.his.sail.Utils
+import se.his.sail.common.{FeaturesSummary, Utils}
 
 import scala.collection.mutable
 import scala.xml.Elem
 
 class ForceDirectedGraph private (val id: String, val dataHub: DataHub) {
 
-  var height: Int = 600
-  var width: Int = 600
-  var minNodeRadius: Int = 5
-  var maxNodeRadius: Int = 15
-  var maxEdgeDistance: Int = 50
+  private var features: FeaturesSummary = _
+
+  def setFeatures(features: FeaturesSummary): this.type = {
+    this.features = features
+    this
+  }
 
   /**
     * The HTML force directed graph element.
     * */
   lazy val elem: Elem = {
+    require(this.features != null, "Feature cannot be null")
+
     val script = new ScriptText(
       s"""
-         |var $id = new ForceDirectedGraph('$id', $width, $height);
+         |var $id = new ForceDirectedGraph('$id', ${this.features.toJSON});
          |$id.listen(${dataHub.id});
          |${dataHub.id}.notify($id);
          |""".stripMargin)
 
-    <div style={s"min-width: ${width}px;"}>
-      <svg id={this.id}></svg>
+    <div>
+      <div id={this.id}></div>
       <script> { script } </script>
     </div>
   }

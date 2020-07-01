@@ -4,9 +4,11 @@ class DataHub {
     this.input_bucket = document.getElementById(input_bucket_id);
     this.output_bucket = document.getElementById(output_bucket_id);
 
-    this.data = [];
+    this.data = null;
     this.selected = [];
     this.listeners = [];
+
+    this.selectedFeature = -1;
 
     if (this.input_bucket != null && typeof this.input_bucket != 'undefined') {
       this.watchBucket(this.input_bucket);
@@ -14,20 +16,37 @@ class DataHub {
   }
 
   notify(listener) {
-    if (typeof listener.listenUpdate !== 'undefined') {
+    if (typeof listener.listenUpdate !== 'undefined' && this.data != null) {
       listener.listenUpdate(this.data);
     }
     this.listeners.push(listener);
     return this;
   }
 
+  setSelectedFeature(featureIndex) {
+    this.selectedFeature = featureIndex;
+    if (featureIndex >= 0) {
+      this.enrichData(this.data);
+    } else {
+      let nodes = this.data.nodes;
+      for (var i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        if ('hsl' in n) delete n.hsl;
+      }
+    }
+    this.notifyUpdate(this.data);
+  }
+
   notifyUpdate(data) {
+    this.data = data;
+
     for (var i = 0; i < this.listeners.length; i++) {
       const listener = this.listeners[i];
       if (typeof listener.listenUpdate !== 'undefined') {
         listener.listenUpdate(data);
       }
     }
+
     return this;
   }
 
@@ -90,6 +109,58 @@ class DataHub {
     }
   }
 
+  enrichData(data) {
+    if (this.selectedFeature < 0) return;
+
+    let nodes = data.nodes;
+    let sf = this.selectedFeature;
+
+    let stats = {
+      'min': Number.MAX_SAFE_INTEGER,
+      'max': Number.MIN_SAFE_INTEGER,
+      'sum': 0,
+      'count': 0
+    }
+
+    for (var i = 0; i < nodes.length; i++) {
+      const x = nodes[i].data[sf];
+      stats.min = Math.min(stats.min, x);
+      stats.max = Math.max(stats.max, x);
+      stats.sum += x;
+      stats.count += 1;
+    }
+
+    stats.avg = stats.sum / stats.count;
+
+    for (var i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      n.hsl = this.spenceHSL(stats, n.data[sf]);
+    }
+  }
+
+  spenceHSL(stats, x) {
+    let scaler = d3.scale.linear();
+    let lightness = .78 - scaler
+      .domain([stats.min, stats.max])
+      .range([.59, .78])(x) + .59
+
+    let saturation = scaler.domain([0, stats.max]).range([0, .95])(x);
+    if (stats.min >= 0) {
+      if (x > stats.avg)
+        saturation = scaler.domain([stats.avg, stats.max]).range([0, .95])(x)
+      else
+        saturation = scaler.domain([0, stats.avg - stats.min]).range([0, .95])(stats.avg - x)
+    }
+    else if (x < 0)
+      saturation = scaler.domain([0, Math.abs(stats.min)]).range([0, .95])(Math.abs(x))
+
+    let hue = 0;
+    if (x < stats.avg) hue = 346
+    else if (x > stats.avg) hue = 34
+
+    return d3.hsl(hue, saturation, lightness);
+  }
+
   watchBucket(bucket) {
     let self = this;
     let scope = angular.element(bucket).scope();
@@ -97,8 +168,9 @@ class DataHub {
     scope.$watch(bucket.id, (newVal, oldVal) => {
       if (typeof newVal !== 'undefined') {
         try {
-          self.data = JSON.parse(newVal);
-          self.notifyUpdate(self.data);
+          let data = JSON.parse(newVal);
+          self.enrichData(data);
+          self.notifyUpdate(data);
         } catch (e) {
           console.log(e);
         }

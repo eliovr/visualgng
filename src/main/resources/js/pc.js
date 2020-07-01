@@ -1,9 +1,9 @@
 class ParallelCoordinates {
-  constructor(elem_id) {
+  constructor(elem_id, features) {
     this.id = elem_id;
     this.datahub = null;
 
-    this.features = [];
+    this.features = features || [];
     this.filters = { lower: [], upper: [] };
 
     this.painted = false;
@@ -64,6 +64,8 @@ class ParallelCoordinates {
 
     filters.append('g').attr('class', 'lower');
     filters.append('g').attr('class', 'upper');
+
+    this.paint();
   }
 
   setFeatures(features) {
@@ -87,7 +89,6 @@ class ParallelCoordinates {
 
   getSeries() {
     return this.svg.select('g.series').selectAll('path');
-      // return d3.select('#$id svg g.series').selectAll('path');
   }
 
   isNotFiltered(d) {
@@ -126,18 +127,18 @@ class ParallelCoordinates {
     if (self.isFiltered(d)) return 'lightgray';
 
     if (typeof d.group != 'undefined' && d.group >= 0)
-        return self.cat10(d.group);
-    else if (typeof d.hsl != 'undefined')
-        return d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
+      return self.cat10(d.group);
+    else if (typeof d.hsl != 'undefined' && d.hsl != null)
+      return d.hsl;
+        // return d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
     else if (typeof d.hue != 'undefined' && d.hue >= 0)
-        return d3.hsl(d.hue, 1, .5);
+      return d3.hsl(d.hue, 1, .5);
     else return null;
   }
 
   paint() {
     let self = this;
     let features = self.features;
-    let data = self.getSeries().data();
     let longest_label = 0;
 
     for (let i = 0; i < features.length; i++) {
@@ -381,31 +382,6 @@ class ParallelCoordinates {
 
   setData(data, redraw) {
     let self = this;
-
-    if (redraw || self.features.length == 0) {
-      self.features = data[0].data.map((x, i) => {
-        return {
-          name: 'col_' + i,
-          min: x,
-          max: x
-        };
-      });
-
-      for (var i = 0; i < data.length; i++) {
-        const d = data[i].data;
-        for (var j = 0; j < self.features.length; j++) {
-          const fx = self.features[j];
-          const dx = d[j];
-          fx.max = Math.max(fx.max, dx);
-          fx.min = Math.min(fx.min, dx);
-        }
-      }
-    }
-
-    if (redraw || !self.painted) {
-      self.paint();
-      self.painted = true;
-    }
 
     let series = self.getSeries().data(data)
       .attr('stroke-width', null)

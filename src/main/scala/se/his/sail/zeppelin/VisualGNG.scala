@@ -4,14 +4,16 @@ import breeze.{linalg => br}
 import org.apache.spark.ml.clustering.{KMeans, KMeansModel}
 import org.apache.spark.ml.feature.{StandardScaler, StringIndexer, VectorAssembler}
 import org.apache.spark.ml.linalg.{SQLDataTypes, Vectors, Vector => SparkVector}
-import org.apache.spark.mllib
+import org.apache.spark.ml.stat.Summarizer
+//import org.apache.spark.mllib
+//import org.apache.spark.mllib.stat.MultivariateStatisticalSummary
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.zeppelin.display.angular.notebookscope.AngularElem._
 import org.slf4j.LoggerFactory
 import se.his.sail.ml._
-import se.his.sail.{Stats, Utils}
+import se.his.sail.common.{JSONArray, JSONObject, Utils, FeaturesSummary}
 
 /**
   * A Visual Analytics library for the Growning Neural Gas (GNG) algorithm (Fritzke)
@@ -26,7 +28,7 @@ import se.his.sail.{Stats, Utils}
   * */
 class VisualGNG private (val id: Int, private var df: DataFrame) {
 
-  private val logger = LoggerFactory.getLogger(classOf[GNG])
+  private val logger = LoggerFactory.getLogger(classOf[VisualGNG])
 
   private val spark = df.sparkSession
 
@@ -40,9 +42,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   var model: GNGModel = _
 
-  private val dataHub: DataHub = DataHub()
-  private val pc: ParallelCoordinates = ParallelCoordinates(dataHub)
-  private val fdg: ForceDirectedGraph = ForceDirectedGraph(dataHub)
+  private val dataHub = DataHub()
+  private val pc = ParallelCoordinates(dataHub)
+  private val fdg = ForceDirectedGraph(dataHub)
 
   def getSelected: String = this.dataHub.get
 
@@ -129,9 +131,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   /**
     * Names of the features used in training. This may vary depending on the previous three.
     * */
-  private var featureNames: Array[String] = Array.empty
-
-  private var indexedLabels: Array[String] = Array.empty
+  private var features: FeaturesSummary = _
 
   /**
     * DataFrame column where the feature vectors are found.
@@ -159,7 +159,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   /**
     * Color by drop down select.
     * */
-  private var featureSelect: Select = _
+//  private var featureSelect: Select = _
 
 
   private val maxEpochsInput: InputNumber = new InputNumber(this.maxEpochs)
@@ -252,6 +252,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   })
 
   private def initialize(): Unit = {
+    logger.info("Initializing input data (extracting features and statistics)")
+
+
     try {
       var outputCol = this.inputCol
       var tempDF: DataFrame = df.na.drop()
@@ -277,7 +280,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
       val firstRow = tempDF.select(inputCols.head, inputCols.tail:_*).first()
 
-      this.featureNames = inputCols.zipWithIndex.flatMap{case (col, i) =>
+      val featureNames = inputCols.zipWithIndex.flatMap{case (col, i) =>
         firstRow.get(i) match {
           case _: Double => Array(col)
           case _: Int => Array(col)
@@ -302,30 +305,23 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .fit(tempDF).transform(tempDF)
       }
 
-//      if (this.labelCol.nonEmpty) {
-//        schemaFields.find(_.name == this.labelCol.get) match {
-//          case Some(sf) if sf.dataType == StringType =>
-//            this.labelCol = Some(sf.name + "_indexed")
-//            val siModel = new StringIndexer()
-//              .setInputCol(sf.name)
-//              .setOutputCol(this.labelCol.get)
-//              .fit(tempDF)
-//
-//            tempDF = siModel.transform(tempDF)
-//            this.indexedLabels = siModel.labels
-//          case Some(sf) if sf.dataType == IntegerType || sf.dataType == DoubleType =>
-//          case _ =>
-//            this.labelCol = None
-//            new Alert("labelCol not found or unsupported data type").elem.display()
-//        }
-//
-//      }
-
       this.df = tempDF
       this.inputCol = outputCol
-      this.rdd = df.select(this.inputCol) .rdd.map{
+      this.rdd = df.select(this.inputCol).rdd.map{
         case Row(f: SparkVector) => new br.DenseVector(f.toArray)
       }
+
+      logger.info("Computing feature stats.")
+      val (min, max): (SparkVector, SparkVector) = df.select(
+        Summarizer.metrics("min", "max")
+          .summary(df(this.inputCol)).as("summary"))
+        .select("summary.min", "summary.max")
+        .as[(SparkVector, SparkVector)]
+        .first()
+
+      this.features = FeaturesSummary(featureNames, min.toArray, max.toArray)
+      this.fdg.setFeatures(this.features)
+      this.pc.setFeatures(this.features)
     }
     catch {
       case e: Throwable =>
@@ -334,18 +330,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     }
 
     this.gng.setInputCol(this.inputCol)
-    this.featureSelect = new Select(this.featureNames)
-      .setOnClickListener(s => {
-        val i = this.featureNames.indexWhere(_ == s)
-
-        if (this.selectedFeature != i) {
-          this.selectedFeature = i
-          if (!this.isTraining) updateGraph()
-        }
-      })
   }
 
   private def initResetTraining(): Unit = {
+    logger.info("Resetting training settings.")
+
     this.epochs = 0
     this.accTime = .0
     this.model = GNGModel(this.rdd)
@@ -368,7 +357,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         <div class="col col-lg-2 btn-group-btn" style="min-width: 200px">
           { executionButton.elem }
           { refreshButton.elem }
-          <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
+            <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
             <span class="glyphicon glyphicon-cog"></span>
           </button>
           <ul class="dropdown-menu" style="padding: 5px" role="menu">
@@ -420,13 +409,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             <li class="divider"></li>
             <li class="text-center">{ applyButton.elem }</li>
           </ul>
-        </div>
-
-        <div class="col col-lg-3" style="min-width: 200px">
-          <div class="input-group input-group-sm">
-            <span class="input-group-addon" title="Color nodes based on the value of the selected feature">Color by</span>
-            { featureSelect.elem }
-          </div>
         </div>
       </div>
 
@@ -499,87 +481,53 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   }
 
 
-  /**
-    * Updates the force directed graph with the current state of the GNG model.
-    * */
   private def updateGraph(): Unit = {
-    val nodes = this.model.nodes
-    val edges = this.model.edges
-    val maxRadius = fdg.maxNodeRadius
-    val minRadius = fdg.minNodeRadius
-    val maxEdgeDistance = fdg.maxEdgeDistance
-
-    val distanceStats = edges.foldLeft(Stats())(_ + _.distance)
-    val counterStats = nodes.foldLeft(Stats())(_ + _.winCounter)
-    val featureStats = nodes.foldLeft(Stats())(_ + _.prototype(this.selectedFeature))
-
-    val nodeRadius: Node => Double = n =>
-      Utils.scale(counterStats.min, counterStats.max)(0, maxRadius - minRadius)(n.winCounter) + minRadius
-
-    val edgeDistance: Edge => Double = e =>
-      Utils.scale(distanceStats.min , distanceStats.max)(0, maxEdgeDistance)(e.distance)
-
-    val toHSL = Utils.spenceHSL(featureStats) _
-
-    val graphNodes = nodes.map( n => {
-      val radius = nodeRadius(n)
-      val (hue, saturation, lightness) = toHSL(n.prototype(this.selectedFeature))
-//      val hint =  s"id: ${n.id} | count: ${Utils.toShortString(n.winCounter)}"
-      val count =  Utils.toShortString(n.winCounter)
-
-      val gn = new GraphNode(n.id)
-        .setRadius(radius)
-        .setHSL(hue.toInt, saturation, lightness)
-        .setData(n.prototype.toArray.mkString("[", ",", "]"))
+    val nodes: Iterable[JSONObject] = this.model.nodes.map{n =>
+      val obj = JSONObject()
+        .setAttr("id", n.id)
+        .setAttr("density", n.winCounter)
+        .setAttr("data", JSONArray(n.prototype.toArray))
 
       n.label match {
-        case Some(l) =>  gn.setHint(s"$l")
-        case None => gn
+        case Some(x) => obj.setAttr("hint", x)
+        case None => obj
       }
-    })
+    }
 
-    val graphEdges = edges.map(e => {
-      new GraphEdge(
-        nodes.indexWhere(_.id == e.source.id),
-        nodes.indexWhere(_.id == e.target.id),
-        edgeDistance(e))
-    })
+    val edges: Iterable[JSONObject] = this.model.edges.map{e =>
+      JSONObject()
+        .setAttr("source", this.model.nodes.indexWhere(_.id == e.source.id))
+        .setAttr("target", this.model.nodes.indexWhere(_.id == e.target.id))
+        .setAttr("distance", e.distance)
+    }
 
-    fdg.setData(graphNodes, graphEdges)
+    val data: JSONObject = JSONObject()
+      .setAttr("nodes", JSONArray(nodes))
+      .setAttr("links", JSONArray(edges))
+
+    dataHub.put(data.toString)
   }
 
 
   /**
     * Display parallel coordinates.
     * */
-  def parallelCoordinates(): Unit = {
-    if (!pc.isDisplayed) {
-      val rddVectors = this.df
-        .select(this.inputCol)
-        .rdd
-        .map{ case Row(vec: SparkVector) => mllib.linalg.Vectors.fromML(vec) }
-                                                                                                                                    
-      pc.setFeatureNames(this.featureNames)
-        .setStats(mllib.stat.Statistics.colStats(rddVectors))
-    }
-
-    pc.display()
-  }
+  def parallelCoordinates(): Unit = pc.display
 
 
   /**
     * Returns a DataFrame with each data point assigned to its closest unit.
     * */
-  def transform(showStats: Boolean = false): Dataset[_] = {
-    val dataset = this.model.transform(df)
+  def transform(updateGraph: Boolean = false): Dataset[_] = {
+    val predictions = this.model.transform(df)
 
-    if (showStats) {
+    if (updateGraph) {
       import org.apache.spark.sql.functions._
       import spark.implicits._
 
       val stats: Array[(Int, Long, String)] = this.labelCol match {
         case Some(label) =>
-          dataset
+          predictions
             .groupBy(model.outputCol)
             .agg(collect_list(label))
             .map{
@@ -591,7 +539,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             }
             .collect()
         case None =>
-          dataset
+          predictions
             .groupBy(model.getOutputCol)
             .count()
             .map(row => (row.getInt(0), row.getLong(1), ""))
@@ -609,32 +557,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         }
       }
 
-      updateGraph()
+      this.updateGraph()
     }
 
-    dataset
+    predictions
   }
-
-  /**
-    * Computes a full count of data points per unit and updates the graph.
-    * */
-//  def computeDensity(): this.type = {
-//    val counts = this.transform
-//      .groupBy(model.getOutputCol)
-//      .count()
-//      .collect()
-//      .map(row => (row.getInt(0), row.getLong(1)))
-//
-//    this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
-//      counts.find(_._1 == i) match {
-//        case Some((_, count)) => n.winCounter = count
-//        case None => n.winCounter = 0
-//      }
-//    }
-//
-//    updateGraph()
-//    this
-//  }
 
 
   /**

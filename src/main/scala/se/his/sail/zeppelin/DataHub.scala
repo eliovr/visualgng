@@ -2,7 +2,7 @@ package se.his.sail.zeppelin
 
 import org.apache.zeppelin.display.angular.notebookscope._
 import AngularElem._
-import se.his.sail.Utils
+import se.his.sail.common.Utils
 
 class DataHub private (val id: String) {
   private val inputBucketId = s"${id}_input_bucket"

@@ -2,79 +2,31 @@ package se.his.sail.zeppelin
 
 import org.apache.zeppelin.display.angular.paragraphscope._
 import AngularElem._
-import org.apache.spark.mllib.stat.MultivariateStatisticalSummary
-import se.his.sail.Utils
-import se.his.sail.Utils._
+import se.his.sail.common.{FeaturesSummary, Utils}
 
 import scala.xml.Elem
 
 class ParallelCoordinates private (val id: String, val dataHub: DataHub) {
 
-  private var featureNames: Array[String] = Array.empty
+  private var features: FeaturesSummary = _
 
-  /**
-    * Stats of each column.
-    * These are used for taking the minimum and maximum values in order
-    * to scale from value to pixels.
-    * */
-  var stats: Option[MultivariateStatisticalSummary] = None
-
-
-  private var colorBy: Option[Int] = Some(0)
-
-  private var displayed = false
-
-  def setFeatureNames(names: Array[String]): ParallelCoordinates = {
-    this.featureNames = names
+  def setFeatures(features: FeaturesSummary): ParallelCoordinates = {
+    this.features = features
     this
   }
-
-  def setStats(stats: MultivariateStatisticalSummary): ParallelCoordinates = {
-    this.stats = Option(stats)
-    this
-  }
-
-  def isDisplayed: Boolean = this.displayed
-
-
-  /**
-    * Set a data feature by which the lines will be colored.
-    * Color is based on Spence et al. (2001) where orange is high values
-    * pink low and gray average.
-    * */
-  def colorBy(feature: String): ParallelCoordinates = {
-    val index = this.featureNames.indexWhere(_ == feature)
-
-    if (index >= 0) this.colorBy = Some(index)
-    else this.colorBy = None
-
-    this
-  }
-
 
   /**
     * The HTML force directed graph element.
     * */
   lazy val elem: Elem = {
-    require(this.featureNames.nonEmpty, "Feature names cannot be empty")
-    require(this.stats.nonEmpty, "Stats (MultivariateStatisticalSummary of the features) must be set")
-
-    val stats = this.stats.get
-
-    val features = (this.featureNames, stats.max.toArray, stats.min.toArray)
-      .zipped
-      .map((name, max, min) => s"{name: '$name', min: $min, max: $max}")
-      .mkString("[", ",", "]")
+    require(this.features != null, "Feature cannot be null")
 
     val script = new ScriptText(
       s"""
-         |var $id = new ParallelCoordinates('$id');
-         |$id.setFeatures($features);
+         |var $id = new ParallelCoordinates('$id', ${this.features.toJSON});
          |$id.listen(${dataHub.id});
          |${dataHub.id}.notify($id);
          |""".stripMargin)
-
-    this.displayed = true
 
     <div>
       <svg id={this.id}></svg>
@@ -85,9 +37,8 @@ class ParallelCoordinates private (val id: String, val dataHub: DataHub) {
   /**
     * Display element in Zeppelin.
     * */
-  def display(): this.type = {
+  def display: this.type = {
     this.elem.display()
-    this.displayed = true
     this
   }
 }
