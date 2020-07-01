@@ -1,16 +1,19 @@
 class ForceDirectedGraph {
-  constructor(elem_id, features) {
+  constructor(elem_id, features, custom_params) {
     this.id = elem_id;
     this.datahub = null;
     this.nodesData = [];
     this.linksData = [];
-    this.width = 600;
-    this.height = 600;
+
+    let params = custom_params || {};
+
+    this.width = params.width || 600;
+    this.height = params.height || 600;
 
     this.selectedCounter = 0;
     this.cat10 = d3.scale.category10().domain(d3.range(10));
 
-    this.withImages = false;
+    this.withImages = params.withImages || false;
     this.displayHint = true;
 
     this.minNodeRadius = 5;
@@ -34,6 +37,8 @@ class ForceDirectedGraph {
     let container = d3.select('#' + elem_id)
       .style({'min-height': this.height + 'px', 'min-width': this.width + 'px'});
 
+    // --------------- Controls
+
     this.controls = container
       .append('div')
       .attr('class', 'controls btn-group-btn')
@@ -44,13 +49,27 @@ class ForceDirectedGraph {
       .attr('class', 'btn btn-default dropdown-toggle btn-sm')
       .attr('data-toggle', 'dropdown')
       .append('span')
-        .text('Graph')
+        .text(' Graph')
         .attr('class', 'glyphicon glyphicon-cog');
 
     this.controls = this.controls.append('ul')
       .attr('class', 'dropdown-menu');
 
-    if (features) {
+    // -- Display hint checkbox.
+    this.controls.append('li')
+      .attr('class', 'dropdown-header')
+      .text('Show hint: ')
+      .append('input')
+        .attr('class', 'ml-2')
+        .attr('type', 'checkbox')
+        .property('checked', this.displayHint)
+        .on('change', () => {
+          this.displayHint = !this.displayHint;
+          this.paint(false);
+        })
+
+    // -- Color by select.
+    if (!this.withImages) {
       let options = [{'name': '-- Select --'}];
       for (var i = 0; i < features.length; i++) {
         options.push(features[i]);
@@ -58,9 +77,9 @@ class ForceDirectedGraph {
 
       let select = this.controls.append('li')
         .attr('class', 'dropdown-header')
-        .text('Color by')
+        .text('Color by: ')
         .append('select')
-        .attr('onclick', 'event.stopPropagation();')
+          .attr('onclick', 'event.stopPropagation();')
           .selectAll('option')
           .data(options);
 
@@ -71,6 +90,8 @@ class ForceDirectedGraph {
           this.datahub.setSelectedFeature(i-1);
         });
     }
+
+    // --------------- Canvas
 
     this.svg = container.append('svg')
       .attr('width', this.width)
@@ -189,6 +210,10 @@ class ForceDirectedGraph {
 
     // update nodes.
     nodes.style('opacity', (d) => self.nodeOpacity(d));
+    nodes.select('text')
+      .text((d) => self.nodeHint(d))
+      .style('display', self.displayHint ? null : 'none');
+
     if (self.withImages) {
       nodes.select("image")
         .attr("xlink:href", (d) => self.nodeImage(d))
@@ -198,10 +223,6 @@ class ForceDirectedGraph {
         .attr('r', (d) => self.nodeRadius(d))
         .attr('stroke', (d) => self.nodeStroke(d))
         .attr('fill', (d) => self.nodeFill(d));
-    }
-
-    if (self.displayHint) {
-      nodes.select('text').text((d) => self.nodeHint(d));
     }
 
     if (self.selectedCounter > 0)
@@ -218,6 +239,14 @@ class ForceDirectedGraph {
       .on('mouseout', onMouseout)
       .on('click', onClick);
 
+    createdNodes.append('text')
+      .attr("dx", 15)
+      .attr("dy", ".05em")
+      .attr('stroke-width', .5)
+      .style('font-size', self.hintFontSize)
+      .style('display', self.displayHint ? null : 'none')
+      .text((d) => self.nodeHint(d));
+
     if (self.withImages) {
       createdNodes.append('image')
         .attr("xlink:href", (d) => self.nodeImage(d))
@@ -227,15 +256,6 @@ class ForceDirectedGraph {
         .attr('r', (d) => self.nodeRadius(d))
         .attr('stroke', (d) => self.nodeStroke(d))
         .attr('fill', (d) => self.nodeFill(d));
-    }
-
-    if (this.displayHint) {
-      createdNodes.append('text')
-        .attr("dx", 15)
-        .attr("dy", ".05em")
-        .attr('stroke-width', .5)
-        .style('font-size', self.hintFontSize)
-        .text((d) => self.nodeHint(d));
     }
 
     // ------------- force-directed placement.

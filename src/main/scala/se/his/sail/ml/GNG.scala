@@ -5,6 +5,7 @@ import org.apache.spark.rdd.RDD
 import breeze.{linalg => br}
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 
 class GNG private (
@@ -18,10 +19,11 @@ class GNG private (
                     var d: Double, // error reduction rate for all nodes
                     var k: Double,
                     var moving: Boolean, // whether it should model a moving distribution
-                    var untangle: Boolean // constraints the creation of edges
+                    var untangle: Boolean, // constraints the creation of edges
+                    var trainingTime: Int
                      ) {
 
-  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true)
+  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0)
 
   var inputCol = "features"
 
@@ -85,6 +87,11 @@ class GNG private (
     this
   }
 
+  def setTrainingTime(seconds: Int): this.type = {
+    this.trainingTime = seconds
+    this
+  }
+
   def getIterations: Int = this.iterations
   def getLambda: Int = this.lambda
   def getMaxNodes: Int = this.maxNodes
@@ -103,25 +110,29 @@ class GNG private (
     val rdd = ds.select(this.inputCol).rdd.map{
       case Row(f: SparkVector) => new br.DenseVector(f.toArray)
     }.persist()
-    val model = this.fit(rdd)()
+
+    val model = this.fit(rdd)
     rdd.unpersist()
+
     model
   }
 
-  def fit(rdd: RDD[br.DenseVector[Double]])(model: GNGModel = GNGModel(rdd)): GNGModel = {
-    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
-    val reduceFit = GNG.fit(lambda, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
+  def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd))
+
+  def fit(rdd: RDD[br.DenseVector[Double]], model: GNGModel): GNGModel = {
+    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, trainingTime) _
+    val reduceFit = GNG.fit(-1, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, 0) _
     val iterations = this.iterations
 
     val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
-      val points = next.toArray
-      var m = model
+      val signals = next.toArray
+      var _model = model
 
       for (_ <- 0 until iterations) {
-        m = mapFit(m, points)
+        _model = mapFit(_model, signals)
       }
 
-      Seq(model).iterator
+      Seq(_model).iterator
     }
 
     models.reduce{ (acc: GNGModel, m: GNGModel) =>
@@ -130,26 +141,49 @@ class GNG private (
   }
 
   def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel(arr)): GNGModel = {
-    val fitFunc = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle) _
+    val optimize = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, trainingTime) _
+
     var m = model
     for (_ <- 0 until iterations) {
-      m = fitFunc(m, arr)
+      m = optimize(m, arr)
     }
     m
   }
 }
 
 case object GNG {
-  def fit(lambda: Int, maxNodes: Int, eps_b: Double, eps_n: Double, maxAge: Int, alpha: Double, d: Double, k: Double, moving: Boolean, disentangle: Boolean)
-         (model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+  def fit(lambda: Int,
+          maxNodes: Int,
+          eps_b: Double,
+          eps_n: Double,
+          maxAge: Int,
+          alpha: Double,
+          d: Double,
+          k: Double,
+          moving: Boolean,
+          disentangle: Boolean,
+          trainingTime: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+
     var units = model.nodes
     var edges = model.edges
+    val totalSignals = inputSignals.size
+    val signalIterator = inputSignals.iterator
+    var accTime = .0
     var signalCounter = 0
 
-    for (signal <- inputSignals) {
+//    for (signal <- inputSignals) {
+    while((trainingTime <= 0 && signalIterator.hasNext) || (trainingTime > 0 && accTime < trainingTime)) {
+      val startTime = System.nanoTime()
+
+      val signal = if (trainingTime > 0) {
+        inputSignals(Random.nextInt(totalSignals))
+      } else {
+        signalIterator.next()
+      }
+
       signalCounter += 1
 
-      /**
+    /**
         * 2. Find the nearest unit S1 and the second-nearest unit S2.
         **/
       val distances = units
@@ -277,6 +311,8 @@ case object GNG {
         }
 
       }
+
+      accTime += (System.nanoTime() - startTime) / 1e9
     }
 
     model.nodes = units

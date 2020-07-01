@@ -81,14 +81,9 @@ class GNGModel private () extends Serializable {
   }
 
   def transform(ds: Dataset[_]): Dataset[_] = {
-//    val prototypes: br.DenseMatrix[Double] = br.DenseMatrix(nodes.map(_.prototype):_*)
     val classify = udf{(col: SparkVector) =>
       val vec = br.DenseVector(col.toArray)
-//      val diff: br.DenseMatrix[Double] = vec - prototypes(br.*, ::)
-//      br.argmin(br.norm(diff(br.*, ::)))
-
       nodes.zipWithIndex.minBy{ case (n, _) => n.distanceTo(vec) }._2
-//      nodes.minBy(_.distanceTo(vec)).id
     }
 
     ds.withColumn(outputCol, classify(ds(inputCol)))

@@ -2,11 +2,9 @@ package se.his.sail.zeppelin
 
 import breeze.{linalg => br}
 import org.apache.spark.ml.clustering.{KMeans, KMeansModel}
-import org.apache.spark.ml.feature.{StandardScaler, StringIndexer, VectorAssembler}
+import org.apache.spark.ml.feature.{StandardScaler, VectorAssembler}
 import org.apache.spark.ml.linalg.{SQLDataTypes, Vectors, Vector => SparkVector}
 import org.apache.spark.ml.stat.Summarizer
-//import org.apache.spark.mllib
-//import org.apache.spark.mllib.stat.MultivariateStatisticalSummary
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Dataset, Row}
@@ -38,15 +36,25 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private var rdd: RDD[br.DenseVector[Double]] = spark.sparkContext.emptyRDD
 
+  /**
+    * Names of the features used in training. This may vary depending on the previous three.
+    * */
+  private var features: FeaturesSummary = _
+
   private val gng = new GNG().setIterations(1)
 
   var model: GNGModel = _
 
+
+  // ---------------- Frontend plots' interfaces ------------
+
   private val dataHub = DataHub()
+
   private val pc = ParallelCoordinates(dataHub)
+
   private val fdg = ForceDirectedGraph(dataHub)
 
-  def getSelected: String = this.dataHub.get
+  def getSelectedNodes: String = this.dataHub.get
 
 
   // ------------- process variables -------------
@@ -122,16 +130,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this
   }
 
-  def setIsImages(isImages: Boolean): this.type = {
+  def setImages(isImages: Boolean): this.type = {
     this.isImages = isImages
     this
   }
 
 
-  /**
-    * Names of the features used in training. This may vary depending on the previous three.
-    * */
-  private var features: FeaturesSummary = _
 
   /**
     * DataFrame column where the feature vectors are found.
@@ -156,15 +160,16 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     */
   private val applyButton: Button = new Button("Apply", "btn btn-warning btn-sm")
 
-  /**
-    * Color by drop down select.
-    * */
-//  private var featureSelect: Select = _
-
+  private val untangleInput: Checkbox = new Checkbox(this.gng.isUntangle)
 
   private val maxEpochsInput: InputNumber = new InputNumber(this.maxEpochs)
     .setMin(100)
     .setStep(10)
+
+  private val trainingTimeInput: InputNumber = new InputNumber(this.gng.trainingTime)
+    .setMin(0)
+    .setMax(10)
+    .setStep(1)
 
   private val maxNodesInput: InputNumber = new InputNumber(this.gng.getMaxNodes)
     .setMin(10)
@@ -198,19 +203,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMax(1)
     .setStep(.1)
 
-  private val untangleInput: Checkbox = new Checkbox(this.gng.isUntangle)
-
   /**
     * Text used for displaying the current status of the training.
     * i.e. iteration #, percentage, nodes and edges.
     * */
   private val statusText: Text = new Text("Iteration: 0").setAttribute("class", "text-muted")
-
-  /**
-    * Indicates the array index of the currently selected feature.
-    * This value may change through _featureSelect.
-    * */
-  private var selectedFeature: Int = 0
 
 
   // ---------- Event listeners -------------
@@ -241,6 +238,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
+    this.gng.setTrainingTime(this.trainingTimeInput.get.toInt)
     this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
     this.gng.setMaxAge(this.maxAgeInput.get.toInt)
     this.gng.setLambda(this.lambdaInput.get.toInt)
@@ -252,8 +250,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   })
 
   private def initialize(): Unit = {
-    logger.info("Initializing input data (extracting features and statistics)")
-
+    logger.info("Initializing input data (assembling training features and statistics)")
 
     try {
       var outputCol = this.inputCol
@@ -312,6 +309,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       }
 
       logger.info("Computing feature stats.")
+
       val (min, max): (SparkVector, SparkVector) = df.select(
         Summarizer.metrics("min", "max")
           .summary(df(this.inputCol)).as("summary"))
@@ -354,17 +352,27 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
     <div class="container">
       <div class="row">
-        <div class="col col-lg-2 btn-group-btn" style="min-width: 200px">
+        <div class="col col-lg-4 btn-group-btn" style="min-width: 200px">
           { executionButton.elem }
           { refreshButton.elem }
             <button type="button" class="btn btn-default dropdown-toggle btn-sm" data-toggle="dropdown">
-            <span class="glyphicon glyphicon-cog"></span>
+            <span class="glyphicon glyphicon-cog"> GNG</span>
           </button>
-          <ul class="dropdown-menu" style="padding: 5px" role="menu">
+          <ul class="dropdown-menu" style="padding: 5px" role="menu" >
+            <li class="dropdown-header custom-control custom-switch" onclick="event.stopPropagation();">Untangled
+              <span class="glyphicon glyphicon-info-sign" title="Constrain the creation of edges">&nbsp;</span>
+              { untangleInput.elem }
+            </li>
+
             <li class="dropdown-header">Max epochs
               <span class="glyphicon glyphicon-info-sign" title="Maximum number of epochs (passes over the whole dataset)"></span>
             </li>
             <li onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
+
+            <li class="dropdown-header">Max seconds per epoch
+              <span class="glyphicon glyphicon-info-sign" title="Maximum (aprox.) number of seconds per epoch per partition (0 = unilimited time)"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ trainingTimeInput.elem }</li>
 
             <li class="dropdown-header">Max nodes
               <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>
@@ -401,11 +409,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             </li>
             <li onclick="event.stopPropagation();">{ dInput.elem }</li>
 
-            <li class="dropdown-header">Untangle
-              <span class="glyphicon glyphicon-info-sign" title="Constrain the creation of edges"></span>
-            </li>
-            <li onclick="event.stopPropagation();">{ untangleInput.elem }</li>
-
             <li class="divider"></li>
             <li class="text-center">{ applyButton.elem }</li>
           </ul>
@@ -429,18 +432,15 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * */
   private def run(): Unit = {
     this.rdd.persist()
-    val fitFunc = gng.fit(rdd) _
 
     try {
       while (this.isTraining) {
-        /** Sampler (S). */
-//        val sample = rdd.takeSample(withReplacement = true, gng.getLambda, this.iterationCounter)
-
-        accTime += Utils.performance {
+        val time = Utils.performance {
           /** Optimizer (O). */
-          this.model = fitFunc(this.model)
+          this.model = gng.fit(rdd, this.model)
         }
 
+        accTime += time
         epochs += 1
 
         /** Report learning state (El). */
@@ -449,10 +449,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         /** Visualization Transformation (U). */
         updateGraph()
 
-        /** Wait at least .1 seconds. Otherwise updates are too fast for user involvement. */
-        val meanTime = accTime / epochs.toDouble
-        if (meanTime < .1) {
-          Thread.sleep(((.1 - meanTime) * 1000).toLong)
+        /** Wait at least .1 seconds when updates are too fast for user involvement. */
+        if (time < .1) {
+          Thread.sleep(1000)
         }
 
         if (this.epochs >= this.maxEpochs) {
@@ -472,11 +471,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * Updates execution stats shown to the user.
     * */
   private def updateStats(): Unit = {
-    val meanTime = accTime / epochs.toDouble
     var str = "Epochs: " + "%03d".format(this.epochs) + "/" + maxEpochs
-    str += f" ($meanTime%1.2f s/epoch)"
+    if (epochs > 0) str += f" (${accTime / epochs.toDouble}%1.2f s/epoch)"
     str += " | Nodes: " + "%03d".format(this.model.nodes.size)
     str += " | Edges: " + "%04d".format(this.model.edges.size)
+    str += s"| Partitions: ${rdd.getNumPartitions}"
+
     this.statusText.set(str)
   }
 

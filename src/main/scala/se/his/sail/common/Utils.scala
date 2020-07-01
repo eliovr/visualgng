@@ -46,7 +46,7 @@ object Utils {
   def performance(f: => Unit): Double = {
     val start = System.nanoTime()
     f
-    (System.nanoTime() - start) / 1000000000
+    (System.nanoTime() - start) / 1e9
   }
 
   /***
