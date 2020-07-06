@@ -166,7 +166,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMin(100)
     .setStep(10)
 
-  private val trainingTimeInput: InputNumber = new InputNumber(this.gng.trainingTime)
+  private val trainingTimeInput: InputNumber = new InputNumber(this.gng.timeConstraint)
     .setMin(0)
     .setMax(10)
     .setStep(1)
@@ -203,11 +203,15 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMax(1)
     .setStep(.1)
 
+  private val maxNeighborsInput: InputNumber = new InputNumber(this.gng.getMaxNeighbors)
+    .setMin(1)
+    .setStep(10)
+
   /**
     * Text used for displaying the current status of the training.
     * i.e. iteration #, percentage, nodes and edges.
     * */
-  private val statusText: Text = new Text("Iteration: 0").setAttribute("class", "text-muted")
+  private val statusText: Text = new Text("Click Run to start training").setAttribute("class", "text-muted")
 
 
   // ---------- Event listeners -------------
@@ -219,6 +223,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
       if (this.isTraining) {
         executionButton.set("Pause")
+        if (epochs <= 0) this.statusText.set("Running first epoch...")
         run()
       } else {
         this.executionButton.set("Run")
@@ -238,7 +243,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
-    this.gng.setTrainingTime(this.trainingTimeInput.get.toInt)
+    this.gng.setTimeConstraint(this.trainingTimeInput.get.toInt)
     this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
     this.gng.setMaxAge(this.maxAgeInput.get.toInt)
     this.gng.setLambda(this.lambdaInput.get.toInt)
@@ -247,9 +252,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.gng.setAlpha(this.alphaInput.get)
     this.gng.setD(this.dInput.get)
     this.gng.setUntangle(this.untangleInput.get)
+    this.gng.setMaxNeighbors(this.maxNeighborsInput.get.toInt)
   })
 
-  private def initialize(): Unit = {
+  private def preprocessData(): Unit = {
     logger.info("Initializing input data (assembling training features and statistics)")
 
     try {
@@ -338,7 +344,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.model = GNGModel(this.rdd)
 
     updateGraph()
-    updateStats()
+    this.statusText.set("Click Run to start training")
+//    updateStats()
   }
 
 
@@ -346,9 +353,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * Show elements in notebook.
     * */
   def display: this.type = {
-    initialize()
-
     logger.info("Displaying visual GNG")
+    preprocessData()
 
     <div class="container">
       <div class="row">
@@ -373,6 +379,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
               <span class="glyphicon glyphicon-info-sign" title="Maximum (aprox.) number of seconds per epoch per partition (0 = unilimited time)"></span>
             </li>
             <li onclick="event.stopPropagation();">{ trainingTimeInput.elem }</li>
+
+            <li class="dropdown-header">Max neighbors
+              <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
+            </li>
+            <li onclick="event.stopPropagation();">{ maxNeighborsInput.elem }</li>
 
             <li class="dropdown-header">Max nodes
               <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>

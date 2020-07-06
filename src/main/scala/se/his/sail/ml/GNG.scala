@@ -4,6 +4,7 @@ import org.apache.spark.ml.linalg.{Vector => SparkVector}
 import org.apache.spark.rdd.RDD
 import breeze.{linalg => br}
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
@@ -20,10 +21,11 @@ class GNG private (
                     var k: Double,
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
-                    var trainingTime: Int
+                    var timeConstraint: Int,
+                    var maxNeighbors: Int
                      ) {
 
-  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0)
+  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0, 4)
 
   var inputCol = "features"
 
@@ -87,8 +89,13 @@ class GNG private (
     this
   }
 
-  def setTrainingTime(seconds: Int): this.type = {
-    this.trainingTime = seconds
+  def setTimeConstraint(seconds: Int): this.type = {
+    this.timeConstraint = seconds
+    this
+  }
+
+  def setMaxNeighbors(n: Int): this.type = {
+    this.maxNeighbors = n
     this
   }
 
@@ -104,6 +111,7 @@ class GNG private (
   def isMoving: Boolean = this.moving
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
+  def getMaxNeighbors: Int = this.maxNeighbors
 
 
   def fit(ds: Dataset[_]): GNGModel = {
@@ -120,8 +128,8 @@ class GNG private (
   def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd))
 
   def fit(rdd: RDD[br.DenseVector[Double]], model: GNGModel): GNGModel = {
-    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, trainingTime) _
-    val reduceFit = GNG.fit(-1, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, 0) _
+    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, timeConstraint, maxNeighbors) _
+    val reduceFit = GNG.fit(-1, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, 0, maxNeighbors) _
     val iterations = this.iterations
 
     val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
@@ -141,7 +149,7 @@ class GNG private (
   }
 
   def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel(arr)): GNGModel = {
-    val optimize = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, trainingTime) _
+    val optimize = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, timeConstraint, maxNeighbors) _
 
     var m = model
     for (_ <- 0 until iterations) {
@@ -161,8 +169,9 @@ case object GNG {
           d: Double,
           k: Double,
           moving: Boolean,
-          disentangle: Boolean,
-          trainingTime: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+          untangle: Boolean,
+          timeConstraint: Int,
+          maxNeighbors: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
     var units = model.nodes
     var edges = model.edges
@@ -171,11 +180,10 @@ case object GNG {
     var accTime = .0
     var signalCounter = 0
 
-//    for (signal <- inputSignals) {
-    while((trainingTime <= 0 && signalIterator.hasNext) || (trainingTime > 0 && accTime < trainingTime)) {
+    while((timeConstraint <= 0 && signalIterator.hasNext) || (timeConstraint > 0 && accTime < timeConstraint)) {
       val startTime = System.nanoTime()
 
-      val signal = if (trainingTime > 0) {
+      val signal = if (timeConstraint > 0) {
         inputSignals(Random.nextInt(totalSignals))
       } else {
         signalIterator.next()
@@ -233,10 +241,9 @@ case object GNG {
       abEdge match {
         case Some(e) => e.age = 0
 
-        case None =>  // -------------- Connect if 1 close neighbor and 4 connections at most
-          if (!disentangle || (hasOneCloseNeighbor(unitA, unitB, edges) && countA <= 4  && countB <= 4))
+        case None =>
+          if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges)))
             edges.append(new Edge(unitA, unitB))
-
       }
 
       /**
@@ -320,24 +327,67 @@ case object GNG {
     model
   }
 
-  def hasOneCloseNeighbor(a: Node, b: Node, edges: ArrayBuffer[Edge], maxSteps: Int = 2): Boolean = {
-    var _edges = edges
-    var units = ArrayBuffer(a)
+  def areCloseNeighbors(a: Node, b: Node, edges: ArrayBuffer[Edge], maxSteps: Int = 2): Boolean = {
+    var openEdges = edges
+    var openNodes = ArrayBuffer(a)
     var neighborsCount = 0
     var steps = 1
-    while (neighborsCount <= 1 && steps <= maxSteps && _edges.nonEmpty) {
+
+    while (neighborsCount <= 1 && steps <= maxSteps && openEdges.nonEmpty) {
       var nextUnits: ArrayBuffer[Node] = ArrayBuffer.empty
-      for (u <- units if neighborsCount <= 1) {
-        neighborsCount += _edges.count(_.connects(u, b))
+
+      for (u <- openNodes if neighborsCount <= 1) {
+        neighborsCount += openEdges.count(_.connects(u, b))
         if (neighborsCount <= 1) {
-          nextUnits = _edges.filter(_.connects(u)).map(_.getPartner(u))
-          _edges = _edges.filterNot(_.connects(u))
+          nextUnits = openEdges.filter(_.connects(u)).map(_.getPartner(u))
+          openEdges = openEdges.filterNot(_.connects(u))
         }
       }
-      units = nextUnits
+      openNodes = nextUnits
       steps += 1
     }
 
     neighborsCount == 1
   }
+
+  def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
+    var exists = false
+    var openEdges = edges
+    var openNodes = ArrayBuffer(a)
+
+    while (!exists && openEdges.nonEmpty) {
+      var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
+
+      for (u <- openNodes if !exists) {
+        exists = openEdges.exists(_.connects(u, b))
+        if (!exists) {
+          nextNodes = openEdges.filter(_.connects(u)).map(_.getPartner(u))
+          openEdges = openEdges.filterNot(_.connects(u))
+        }
+      }
+      openNodes = nextNodes
+    }
+
+    exists
+  }
+
+  def networkCountCompare(a: Node, edges: ArrayBuffer[Edge], maxNodes: Int = 3): Boolean = {
+    var openEdges = edges
+    var openNodes = ArrayBuffer(a)
+    val closedNodes: mutable.Set[Int] = mutable.Set(a.id)
+
+    while (closedNodes.size <= maxNodes && openNodes.nonEmpty) {
+      var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
+
+      for (u <- openNodes if closedNodes.size <= maxNodes) {
+        nextNodes = openEdges.filter(e => e.connects(u) && !closedNodes.contains(e.getPartner(u).id)).map(_.getPartner(u))
+        openEdges = openEdges.filterNot(e => e.connects(u))
+        nextNodes.foreach(u => closedNodes.add(u.id))
+      }
+      openNodes = nextNodes
+    }
+
+    closedNodes.size <= maxNodes
+  }
+
 }
