@@ -41,7 +41,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * */
   private var features: FeaturesSummary = _
 
-  private val gng = new GNG().setIterations(1)
+  private val gng = new GNG()
+    .setIterations(1)
+    .setTimeConstraint(1)
 
   var model: GNGModel = _
 
@@ -205,7 +207,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val maxNeighborsInput: InputNumber = new InputNumber(this.gng.getMaxNeighbors)
     .setMin(1)
-    .setStep(10)
+    .setStep(1)
+
+  private val maxStepsInput: InputNumber = new InputNumber(this.gng.getMaxSteps)
+    .setMin(2)
+    .setStep(1)
 
   /**
     * Text used for displaying the current status of the training.
@@ -243,16 +249,18 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
-    this.gng.setTimeConstraint(this.trainingTimeInput.get.toInt)
-    this.gng.setMaxNodes(this.maxNodesInput.get.toInt)
-    this.gng.setMaxAge(this.maxAgeInput.get.toInt)
-    this.gng.setLambda(this.lambdaInput.get.toInt)
-    this.gng.setEpsB(this.epsBInput.get)
-    this.gng.setEpsN(this.epsNInput.get)
-    this.gng.setAlpha(this.alphaInput.get)
-    this.gng.setD(this.dInput.get)
-    this.gng.setUntangle(this.untangleInput.get)
-    this.gng.setMaxNeighbors(this.maxNeighborsInput.get.toInt)
+    this.gng
+      .setTimeConstraint(this.trainingTimeInput.get.toInt)
+      .setMaxNodes(this.maxNodesInput.get.toInt)
+      .setMaxAge(this.maxAgeInput.get.toInt)
+      .setLambda(this.lambdaInput.get.toInt)
+      .setEpsB(this.epsBInput.get)
+      .setEpsN(this.epsNInput.get)
+      .setAlpha(this.alphaInput.get)
+      .setD(this.dInput.get)
+      .setUntangle(this.untangleInput.get)
+      .setMaxNeighbors(this.maxNeighborsInput.get.toInt)
+      .setMaxSteps(this.maxStepsInput.get.toInt)
   })
 
   private def preprocessData(): Unit = {
@@ -341,11 +349,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
     this.epochs = 0
     this.accTime = .0
-    this.model = GNGModel(this.rdd)
+    this.model = GNGModel(this.rdd, maxAge=this.gng.maxAge)
 
     updateGraph()
     this.statusText.set("Click Run to start training")
-//    updateStats()
   }
 
 
@@ -365,7 +372,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             <span class="glyphicon glyphicon-cog"> GNG</span>
           </button>
           <ul class="dropdown-menu" style="padding: 5px" role="menu" >
-            <li class="dropdown-header custom-control custom-switch" onclick="event.stopPropagation();">Untangled
+            <li class="dropdown-header" onclick="event.stopPropagation();">Untangled
               <span class="glyphicon glyphicon-info-sign" title="Constrain the creation of edges">&nbsp;</span>
               { untangleInput.elem }
             </li>
@@ -373,52 +380,57 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             <li class="dropdown-header">Max epochs
               <span class="glyphicon glyphicon-info-sign" title="Maximum number of epochs (passes over the whole dataset)"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
 
             <li class="dropdown-header">Max seconds per epoch
               <span class="glyphicon glyphicon-info-sign" title="Maximum (aprox.) number of seconds per epoch per partition (0 = unilimited time)"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ trainingTimeInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ trainingTimeInput.elem }</li>
 
             <li class="dropdown-header">Max neighbors
               <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ maxNeighborsInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxNeighborsInput.elem }</li>
+
+            <li class="dropdown-header">Max steps
+              <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxStepsInput.elem }</li>
 
             <li class="dropdown-header">Max nodes
               <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ maxNodesInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxNodesInput.elem }</li>
 
             <li class="dropdown-header">Lamda
               <span class="glyphicon glyphicon-info-sign" title="Number of iterations to run before creating a new node"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
 
             <li class="dropdown-header">Max edge age
               <span class="glyphicon glyphicon-info-sign" title="How many iterations an 'obsolete' edge can live"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
 
             <li class="dropdown-header">eps b
               <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (closest node)"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ epsBInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsBInput.elem }</li>
 
             <li class="dropdown-header">eps n
               <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (neighbors of closest node)"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ epsNInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsNInput.elem }</li>
 
-            <li class="dropdown-header">alpha
+            <li class="dropdown-header" style="display: None">alpha
               <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for the neighbors of a newly created node"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ alphaInput.elem }</li>
+            <li  class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ alphaInput.elem }</li>
 
-            <li class="dropdown-header">d
+            <li class="dropdown-header" style="display: None">d
               <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for all nodes"></span>
             </li>
-            <li onclick="event.stopPropagation();">{ dInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ dInput.elem }</li>
 
             <li class="divider"></li>
             <li class="text-center">{ applyButton.elem }</li>
@@ -448,6 +460,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       while (this.isTraining) {
         val time = Utils.performance {
           /** Optimizer (O). */
+          this.model.nodes.foreach(n => {
+            n.error = 0
+            n.winCounter = 0
+            n.utility = 0
+          })
+          this.model.edges.foreach(_.age = 0)
           this.model = gng.fit(rdd, this.model)
         }
 

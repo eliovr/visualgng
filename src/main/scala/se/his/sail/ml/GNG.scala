@@ -22,10 +22,11 @@ class GNG private (
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
                     var timeConstraint: Int,
-                    var maxNeighbors: Int
+                    var maxNeighbors: Int,
+                    var maxSteps: Int
                      ) {
 
-  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0, 4)
+  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0, 6, 2)
 
   var inputCol = "features"
 
@@ -99,6 +100,11 @@ class GNG private (
     this
   }
 
+  def setMaxSteps(steps: Int): this.type = {
+    this.maxSteps = steps
+    this
+  }
+
   def getIterations: Int = this.iterations
   def getLambda: Int = this.lambda
   def getMaxNodes: Int = this.maxNodes
@@ -112,6 +118,7 @@ class GNG private (
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
   def getMaxNeighbors: Int = this.maxNeighbors
+  def getMaxSteps: Int = this.maxSteps
 
 
   def fit(ds: Dataset[_]): GNGModel = {
@@ -125,11 +132,24 @@ class GNG private (
     model
   }
 
-  def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd))
+  def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd, maxAge=maxAge))
 
   def fit(rdd: RDD[br.DenseVector[Double]], model: GNGModel): GNGModel = {
-    val mapFit = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, timeConstraint, maxNeighbors) _
-    val reduceFit = GNG.fit(-1, maxNodes, eps_b + eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, 0, maxNeighbors) _
+    val mapFit = GNG.fit(
+      lambda,
+      maxNodes,
+      eps_b, eps_n,
+      maxAge,
+      alpha, d, k,
+      moving, untangle, timeConstraint, maxNeighbors, maxSteps) _
+
+    val reduceFit = GNG.fit(maxNodes*2,
+      maxNodes,
+      eps_b + eps_b, eps_n,
+      maxAge,
+      alpha, d, k,
+      moving, untangle, 0, maxNeighbors, maxSteps) _
+
     val iterations = this.iterations
 
     val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
@@ -149,7 +169,13 @@ class GNG private (
   }
 
   def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel(arr)): GNGModel = {
-    val optimize = GNG.fit(lambda, maxNodes, eps_b, eps_n, maxAge, alpha, d, k, moving, untangle, timeConstraint, maxNeighbors) _
+    val optimize = GNG.fit(
+      lambda,
+      maxNodes,
+      eps_b, eps_n,
+      maxAge,
+      alpha, d, k,
+      moving, untangle, timeConstraint, maxNeighbors, maxSteps) _
 
     var m = model
     for (_ <- 0 until iterations) {
@@ -171,7 +197,8 @@ case object GNG {
           moving: Boolean,
           untangle: Boolean,
           timeConstraint: Int,
-          maxNeighbors: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+          maxNeighbors: Int,
+          maxSteps: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
     var units = model.nodes
     var edges = model.edges
@@ -188,7 +215,6 @@ case object GNG {
       } else {
         signalIterator.next()
       }
-
       signalCounter += 1
 
     /**
@@ -239,18 +265,22 @@ case object GNG {
         * edge to zero. If such an edge does not exist, create it.
         **/
       abEdge match {
-        case Some(e) => e.age = 0
+        case Some(e) =>
+          e.age = 0
+          e.maxAge += 1 / maxAge
 
         case None =>
-          if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges)))
+          if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges, maxSteps))) {
             edges.append(new Edge(unitA, unitB))
+          }
       }
 
       /**
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
         **/
-      edges = edges.filter(_.age <= maxAge)
+//      edges = edges.filter(_.age <= maxAge)
+      edges = edges.filter(e => e.age <= e.maxAge)
       units = units.filter(n => edges.exists(_.connects(n)))
 
       /**
@@ -304,8 +334,8 @@ case object GNG {
             * and remove the original edge between q and f.
             **/
           edges = edges.filterNot(_.connects(q, f))
-          edges.append(new Edge(q, r))
-          edges.append(new Edge(f, r))
+          edges.append(new Edge(q, r, maxAge=maxAge))
+          edges.append(new Edge(f, r, maxAge=maxAge))
 
           /**
             * Decrease the error variables of q and f by multiplying them
@@ -350,10 +380,34 @@ case object GNG {
     neighborsCount == 1
   }
 
+  def formsDimensionalObject(a: Node, b: Node, edges: ArrayBuffer[Edge], dimensionality: Int = 2): Boolean = {
+    val neighborNodes = edges.filter(_.connects(a)).map(_.getPartner(a))
+    val neighborsEdges = edges.filter(e => !e.connects(a) && neighborNodes.exists(e.connects) )
+    val bridgeNodes = neighborsEdges.filter(_.connects(b)).map(_.getPartner(b))
+    val bridgesCount = bridgeNodes.size
+    var allowedDimensionality = bridgesCount > 0 && bridgesCount <= dimensionality
+
+    if (bridgesCount == dimensionality) {
+      var connections = 0
+      for (i <- 0 until bridgesCount-1) {
+        val n1 = bridgeNodes(i)
+        for (j <- i+1 until bridgesCount) {
+          val n2 = bridgeNodes(j)
+          if (neighborsEdges.exists(_.connects(n1, n2))) {
+            connections += 1
+          }
+        }
+      }
+      allowedDimensionality = connections < bridgesCount-1
+    }
+    allowedDimensionality
+  }
+
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
     var exists = false
     var openEdges = edges
     var openNodes = ArrayBuffer(a)
+    val closedNodes: ArrayBuffer[Node] = ArrayBuffer.empty
 
     while (!exists && openEdges.nonEmpty) {
       var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
@@ -361,10 +415,15 @@ case object GNG {
       for (u <- openNodes if !exists) {
         exists = openEdges.exists(_.connects(u, b))
         if (!exists) {
-          nextNodes = openEdges.filter(_.connects(u)).map(_.getPartner(u))
+          nextNodes = openEdges
+            .filter(_.connects(u))
+            .map(_.getPartner(u))
+            .filterNot(closedNodes.contains)
+
           openEdges = openEdges.filterNot(_.connects(u))
         }
       }
+      closedNodes ++= openNodes
       openNodes = nextNodes
     }
 
