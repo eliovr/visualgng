@@ -43,7 +43,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val gng = new GNG()
     .setIterations(1)
-    .setTimeConstraint(1)
+    .setMaxSignals(1000)
 
   var model: GNGModel = _
 
@@ -65,7 +65,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * Whether to continue to iterate (to fit the model to the data) or not.
     * */
   private var isTraining = false
-  private var maxEpochs = 100
+  private var maxEpochs = 50
   private var epochs = 0
   private var accTime = .0
 
@@ -163,53 +163,65 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   private val applyButton: Button = new Button("Apply", "btn btn-warning btn-sm")
 
   private val untangleInput: Checkbox = new Checkbox(this.gng.isUntangle)
+    .setHint("Train using the untangle mechanism")
 
   private val maxEpochsInput: InputNumber = new InputNumber(this.maxEpochs)
-    .setMin(100)
-    .setStep(10)
+    .setHint("Maximum number of epochs to run")
+    .setMin(1)
+    .setStep(5)
 
-  private val trainingTimeInput: InputNumber = new InputNumber(this.gng.timeConstraint)
+  private val maxSignalsInput: InputNumber = new InputNumber(this.gng.maxSignals / 1000)
+    .setHint("Maximum number of signals (data points) taken by each Spark partition (0 = all)")
     .setMin(0)
-    .setMax(10)
+    .setMax(20)
     .setStep(1)
 
   private val maxNodesInput: InputNumber = new InputNumber(this.gng.getMaxNodes)
+    .setHint("Maximum number of units")
     .setMin(10)
     .setStep(10)
 
   private val lambdaInput: InputNumber = new InputNumber(this.gng.getLambda)
+    .setHint("Number of 'seen' signals before creating a new unit")
     .setMin(1)
     .setStep(10)
 
   private val maxAgeInput: InputNumber = new InputNumber(this.gng.getMaxAge)
+    .setHint("Maximum age an edge can have before removing it (a higher number will foster more edges to remain)")
     .setMin(1)
-    .setStep(10)
+    .setStep(1)
 
   private val epsBInput: InputNumber = new InputNumber(this.gng.getEpsB)
+    .setHint("Learning rate for the winning unit")
     .setMin(.0)
     .setMax(1)
     .setStep(.1)
 
   private val epsNInput: InputNumber = new InputNumber(this.gng.getEpsN)
+    .setHint("Learning rate for the neighbors of the winning unit")
     .setMin(.0)
     .setMax(1)
     .setStep(.1)
 
   private val alphaInput: InputNumber = new InputNumber(this.gng.getAlpha)
+    .setHint("Error reduction rate for the neighbors of a newly created unit")
     .setMin(.0)
     .setMax(1)
     .setStep(.1)
 
   private val dInput: InputNumber = new InputNumber(this.gng.getD)
+    .setHint("Error reduction rate for all units")
     .setMin(.0)
     .setMax(1)
     .setStep(.1)
 
   private val maxNeighborsInput: InputNumber = new InputNumber(this.gng.getMaxNeighbors)
+    .setHint("Maximum number of neighbors (connections) a unit can have")
     .setMin(1)
     .setStep(1)
 
   private val maxStepsInput: InputNumber = new InputNumber(this.gng.getMaxSteps)
+    .setHint("How far a neighbor should be in order to allow a connection between them")
     .setMin(2)
     .setStep(1)
 
@@ -250,7 +262,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
     this.gng
-      .setTimeConstraint(this.trainingTimeInput.get.toInt)
+      .setMaxSignals((this.maxSignalsInput.get * 1000).toInt)
       .setMaxNodes(this.maxNodesInput.get.toInt)
       .setMaxAge(this.maxAgeInput.get.toInt)
       .setLambda(this.lambdaInput.get.toInt)
@@ -347,6 +359,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   private def initResetTraining(): Unit = {
     logger.info("Resetting training settings.")
 
+    this.isTraining = false
     this.epochs = 0
     this.accTime = .0
     this.model = GNGModel(this.rdd, maxAge=this.gng.maxAge)
@@ -372,20 +385,58 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             <span class="glyphicon glyphicon-cog"> GNG</span>
           </button>
           <ul class="dropdown-menu" style="padding: 5px" role="menu" >
-            <li class="dropdown-header" onclick="event.stopPropagation();">Untangled
-              <span class="glyphicon glyphicon-info-sign" title="Constrain the creation of edges">&nbsp;</span>
-              { untangleInput.elem }
-            </li>
 
             <li class="dropdown-header">Max epochs
-              <span class="glyphicon glyphicon-info-sign" title="Maximum number of epochs (passes over the whole dataset)"></span>
+              <span class="glyphicon glyphicon-info-sign" title={ maxEpochsInput.hint }></span>
             </li>
             <li class="input-group-sm" onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
 
-            <li class="dropdown-header">Max seconds per epoch
-              <span class="glyphicon glyphicon-info-sign" title="Maximum (aprox.) number of seconds per epoch per partition (0 = unilimited time)"></span>
+            <li class="dropdown-header">Max signals (thousands)
+              <span class="glyphicon glyphicon-info-sign" title={ maxSignalsInput.hint }></span>
             </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ trainingTimeInput.elem }</li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxSignalsInput.elem }</li>
+
+            <li class="dropdown-header">Max nodes
+              <span class="glyphicon glyphicon-info-sign" title={ maxNodesInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxNodesInput.elem }</li>
+
+            <li class="dropdown-header">Lamda
+              <span class="glyphicon glyphicon-info-sign" title={ lambdaInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
+
+            <li class="dropdown-header">Max edge age
+              <span class="glyphicon glyphicon-info-sign" title={ maxAgeInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
+
+            <li class="dropdown-header">eps b
+              <span class="glyphicon glyphicon-info-sign" title={ epsBInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsBInput.elem }</li>
+
+            <li class="dropdown-header">eps n
+              <span class="glyphicon glyphicon-info-sign" title={ epsNInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsNInput.elem }</li>
+
+            <li class="dropdown-header" style="display: None">alpha
+              <span class="glyphicon glyphicon-info-sign" title={ alphaInput.hint }></span>
+            </li>
+            <li  class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ alphaInput.elem }</li>
+
+            <li class="dropdown-header" style="display: None">d
+              <span class="glyphicon glyphicon-info-sign" title={ dInput.hint }></span>
+            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ dInput.elem }</li>
+
+            <li class="divider"></li>
+
+            <li class="dropdown-header" onclick="event.stopPropagation();">Untangled
+              <span class="glyphicon glyphicon-info-sign" title={ untangleInput.hint }>&nbsp;</span>
+              { untangleInput.elem }
+            </li>
 
             <li class="dropdown-header">Max neighbors
               <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
@@ -397,42 +448,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             </li>
             <li class="input-group-sm" onclick="event.stopPropagation();">{ maxStepsInput.elem }</li>
 
-            <li class="dropdown-header">Max nodes
-              <span class="glyphicon glyphicon-info-sign" title="Maximum number nodes"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxNodesInput.elem }</li>
-
-            <li class="dropdown-header">Lamda
-              <span class="glyphicon glyphicon-info-sign" title="Number of iterations to run before creating a new node"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ lambdaInput.elem }</li>
-
-            <li class="dropdown-header">Max edge age
-              <span class="glyphicon glyphicon-info-sign" title="How many iterations an 'obsolete' edge can live"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxAgeInput.elem }</li>
-
-            <li class="dropdown-header">eps b
-              <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (closest node)"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsBInput.elem }</li>
-
-            <li class="dropdown-header">eps n
-              <span class="glyphicon glyphicon-info-sign" title="Adaptation step size (neighbors of closest node)"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ epsNInput.elem }</li>
-
-            <li class="dropdown-header" style="display: None">alpha
-              <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for the neighbors of a newly created node"></span>
-            </li>
-            <li  class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ alphaInput.elem }</li>
-
-            <li class="dropdown-header" style="display: None">d
-              <span class="glyphicon glyphicon-info-sign" title="Error reduction rate for all nodes"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ dInput.elem }</li>
-
             <li class="divider"></li>
+
             <li class="text-center">{ applyButton.elem }</li>
           </ul>
         </div>
@@ -462,7 +479,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           /** Optimizer (O). */
           this.model.nodes.foreach(n => {
             n.error = 0
-            n.winCounter = 0
+//            n.winCounter = 0
             n.utility = 0
           })
           this.model.edges.foreach(_.age = 0)

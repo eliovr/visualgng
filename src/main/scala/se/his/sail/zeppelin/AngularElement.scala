@@ -22,6 +22,7 @@ abstract class AngularElement [T] {
 
   val id: String = AngularElement.nextID
   var elem: AbstractAngularElem
+  var hint: String = _
 
   def get: T =
     AngularModel(id)().asInstanceOf[T]
@@ -33,6 +34,11 @@ abstract class AngularElement [T] {
   def setAttribute(attr: String, value: String): this.type = {
     elem = elem % new UnprefixedAttribute(attr, value, Null)
     this
+  }
+
+  def setHint(hint: String): this.type = {
+    this.hint = hint
+    this.setAttribute("title", hint)
   }
 
   def setOnClickListener(f: (T) => Unit): this.type = {

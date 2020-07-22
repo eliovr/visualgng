@@ -8,13 +8,14 @@ import org.apache.spark.sql.functions.udf
 
 import scala.collection.mutable.ArrayBuffer
 
-class Node(
-            val id: Int,
+class Node( val id: Int,
             val prototype: br.DenseVector[Double],
-            var error: Double = 0,
-            var utility: Double = 0,
-            var winCounter: Long = 0
+            var error: Double,
+            var utility: Double,
+            var winCounter: Long
           ) extends Serializable {
+
+  def this(id: Int, prototype: br.DenseVector[Double]) = this(id, prototype, 0, 0, 0)
 
   var label: Option[String] = None
 
@@ -57,7 +58,7 @@ class GNGModel private () extends Serializable {
   var nodes: ArrayBuffer[Node] = ArrayBuffer.empty
   var edges: ArrayBuffer[Edge] = ArrayBuffer.empty
 
-  var nextUnitId: Int = 0
+  var nextUnitId: Int = -1
   var inputCol: String = "features"
   var outputCol: String = "prediction"
 
@@ -75,10 +76,10 @@ class GNGModel private () extends Serializable {
   def getOutputCol: String = this.outputCol
 
   def createUnit(prototype: br.DenseVector[Double]): Node = {
-    val u = new Node(nextUnitId, prototype)
-    nodes.append(u)
     nextUnitId += 1
-    u
+    val unit = new Node(nextUnitId, prototype)
+    nodes.append(unit)
+    unit
   }
 
   def transform(ds: Dataset[_]): Dataset[_] = {

@@ -21,12 +21,12 @@ class GNG private (
                     var k: Double,
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
-                    var timeConstraint: Int,
+                    var maxSignals: Int,
                     var maxNeighbors: Int,
                     var maxSteps: Int
                      ) {
 
-  def this() = this(15000, 100, 100, .2, .006, 50, .5, .995, 3, false, true, 0, 6, 2)
+  def this() = this(15, 100, 100, .2, .006, 20, .5, .995, 0, false, true, 0, 6, 2)
 
   var inputCol = "features"
 
@@ -90,8 +90,8 @@ class GNG private (
     this
   }
 
-  def setTimeConstraint(seconds: Int): this.type = {
-    this.timeConstraint = seconds
+  def setMaxSignals(maxSignals: Int): this.type = {
+    this.maxSignals = maxSignals
     this
   }
 
@@ -117,6 +117,7 @@ class GNG private (
   def isMoving: Boolean = this.moving
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
+  def getMaxSignals: Int = this.maxSignals
   def getMaxNeighbors: Int = this.maxNeighbors
   def getMaxSteps: Int = this.maxSteps
 
@@ -141,9 +142,9 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, timeConstraint, maxNeighbors, maxSteps) _
+      moving, untangle, maxSignals, maxNeighbors, maxSteps) _
 
-    val reduceFit = GNG.fit(maxNodes*2,
+    val reduceFit = GNG.fit(-1,
       maxNodes,
       eps_b + eps_b, eps_n,
       maxAge,
@@ -168,14 +169,16 @@ class GNG private (
     }.setInputCol(this.inputCol)
   }
 
-  def fitSequential(arr: Array[br.DenseVector[Double]])(model: GNGModel = GNGModel(arr)): GNGModel = {
+  def fitSequential(arr: Seq[br.DenseVector[Double]]): GNGModel = fitSequential(arr, GNGModel(arr))
+
+  def fitSequential(arr: Seq[br.DenseVector[Double]], model: GNGModel): GNGModel = {
     val optimize = GNG.fit(
       lambda,
       maxNodes,
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, timeConstraint, maxNeighbors, maxSteps) _
+      moving, untangle, maxSignals, maxNeighbors, maxSteps) _
 
     var m = model
     for (_ <- 0 until iterations) {
@@ -196,7 +199,7 @@ case object GNG {
           k: Double,
           moving: Boolean,
           untangle: Boolean,
-          timeConstraint: Int,
+          maxSignals: Int,
           maxNeighbors: Int,
           maxSteps: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
@@ -204,13 +207,10 @@ case object GNG {
     var edges = model.edges
     val totalSignals = inputSignals.size
     val signalIterator = inputSignals.iterator
-    var accTime = .0
     var signalCounter = 0
 
-    while((timeConstraint <= 0 && signalIterator.hasNext) || (timeConstraint > 0 && accTime < timeConstraint)) {
-      val startTime = System.nanoTime()
-
-      val signal = if (timeConstraint > 0) {
+    while((maxSignals <= 0 && signalIterator.hasNext) || (maxSignals > 0 && signalCounter < maxSignals)) {
+      val signal = if (maxSignals > 0) {
         inputSignals(Random.nextInt(totalSignals))
       } else {
         signalIterator.next()
@@ -333,9 +333,18 @@ case object GNG {
             * Insert edges connecting the new unit r with units q and f,
             * and remove the original edge between q and f.
             **/
-          edges = edges.filterNot(_.connects(q, f))
-          edges.append(new Edge(q, r, maxAge=maxAge))
-          edges.append(new Edge(f, r, maxAge=maxAge))
+//          edges = edges.filterNot(_.connects(q, f))
+//          edges.append(new Edge(q, r, maxAge=maxAge))
+//          edges.append(new Edge(f, r, maxAge=maxAge))
+
+          var age: Double = .0
+          edges = edges.filterNot(e => {
+            if (e.connects(q, f)) age = e.maxAge
+            e.connects(q, f)
+          })
+          age = maxAge + ((age - maxAge) * .5)
+          edges.append(new Edge(q, r, maxAge=age))
+          edges.append(new Edge(f, r, maxAge=age))
 
           /**
             * Decrease the error variables of q and f by multiplying them
@@ -348,8 +357,6 @@ case object GNG {
         }
 
       }
-
-      accTime += (System.nanoTime() - startTime) / 1e9
     }
 
     model.nodes = units
