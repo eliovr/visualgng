@@ -477,12 +477,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       while (this.isTraining) {
         val time = Utils.performance {
           /** Optimizer (O). */
-          this.model.nodes.foreach(n => {
-            n.error = 0
-//            n.winCounter = 0
-            n.utility = 0
-          })
-          this.model.edges.foreach(_.age = 0)
+          // this.model.nodes.foreach(n => {
+          //   n.error = 0
+          //   n.winCounter = 0
+          //   n.utility = 0
+          // })
+          // this.model.edges.foreach(_.age = 0)
           this.model = gng.fit(rdd, this.model)
         }
 

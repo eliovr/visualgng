@@ -26,7 +26,7 @@ class GNG private (
                     var maxSteps: Int
                      ) {
 
-  def this() = this(15, 100, 100, .2, .006, 20, .5, .995, 0, false, true, 0, 6, 2)
+  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 0, 6, 2)
 
   var inputCol = "features"
 
@@ -267,10 +267,11 @@ case object GNG {
       abEdge match {
         case Some(e) =>
           e.age = 0
-          e.maxAge += 1 / maxAge
+          e.maxAge += 1 / maxAge.toDouble
 
         case None =>
-          if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges, maxSteps))) {
+          // if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges, maxSteps))) {
+          if (!untangle || isTwoDimensional(unitA, unitB, edges)) {
             edges.append(new Edge(unitA, unitB))
           }
       }
@@ -279,7 +280,7 @@ case object GNG {
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
         **/
-//      edges = edges.filter(_.age <= maxAge)
+      // edges = edges.filter(_.age <= maxAge)
       edges = edges.filter(e => e.age <= e.maxAge)
       units = units.filter(n => edges.exists(_.connects(n)))
 
@@ -333,18 +334,9 @@ case object GNG {
             * Insert edges connecting the new unit r with units q and f,
             * and remove the original edge between q and f.
             **/
-//          edges = edges.filterNot(_.connects(q, f))
-//          edges.append(new Edge(q, r, maxAge=maxAge))
-//          edges.append(new Edge(f, r, maxAge=maxAge))
-
-          var age: Double = .0
-          edges = edges.filterNot(e => {
-            if (e.connects(q, f)) age = e.maxAge
-            e.connects(q, f)
-          })
-          age = maxAge + ((age - maxAge) * .5)
-          edges.append(new Edge(q, r, maxAge=age))
-          edges.append(new Edge(f, r, maxAge=age))
+          edges = edges.filterNot(_.connects(q, f))
+          edges.append(new Edge(q, r, maxAge=maxAge))
+          edges.append(new Edge(f, r, maxAge=maxAge))
 
           /**
             * Decrease the error variables of q and f by multiplying them
@@ -387,28 +379,39 @@ case object GNG {
     neighborsCount == 1
   }
 
-  def formsDimensionalObject(a: Node, b: Node, edges: ArrayBuffer[Edge], dimensionality: Int = 2): Boolean = {
-    val neighborNodes = edges.filter(_.connects(a)).map(_.getPartner(a))
-    val neighborsEdges = edges.filter(e => !e.connects(a) && neighborNodes.exists(e.connects) )
-    val bridgeNodes = neighborsEdges.filter(_.connects(b)).map(_.getPartner(b))
-    val bridgesCount = bridgeNodes.size
-    var allowedDimensionality = bridgesCount > 0 && bridgesCount <= dimensionality
-
-    if (bridgesCount == dimensionality) {
-      var connections = 0
-      for (i <- 0 until bridgesCount-1) {
-        val n1 = bridgeNodes(i)
-        for (j <- i+1 until bridgesCount) {
-          val n2 = bridgeNodes(j)
-          if (neighborsEdges.exists(_.connects(n1, n2))) {
-            connections += 1
-          }
-        }
-      }
-      allowedDimensionality = connections < bridgesCount-1
+  def isTwoDimensional(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
+    def getBridges(x: Node, y: Node): ArrayBuffer[Node] = {
+      val neighborNodes = edges.filter(_.connects(x)).map(_.getPartner(x))
+      val neighborsEdges = edges.filter(e => !e.connects(x) && neighborNodes.exists(e.connects) )
+      neighborsEdges.filter(_.connects(y)).map(_.getPartner(y))
     }
-    allowedDimensionality
+
+    val abBridgeNodes = getBridges(a, b)
+    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).size <= 1)
   }
+
+  // def formsDimensionalObject(a: Node, b: Node, edges: ArrayBuffer[Edge], dimensionality: Int = 2): Boolean = {
+  //   val neighborNodes = edges.filter(_.connects(a)).map(_.getPartner(a))
+  //   val neighborsEdges = edges.filter(e => !e.connects(a) && neighborNodes.exists(e.connects) )
+  //   val bridgeNodes = neighborsEdges.filter(_.connects(b)).map(_.getPartner(b))
+  //   val bridgesCount = bridgeNodes.size
+  //   var allowedDimensionality = bridgesCount > 0 && bridgesCount <= dimensionality
+  //
+  //   if (bridgesCount == dimensionality) {
+  //     var connections = 0
+  //     for (i <- 0 until bridgesCount-1) {
+  //       val n1 = bridgeNodes(i)
+  //       for (j <- i+1 until bridgesCount) {
+  //         val n2 = bridgeNodes(j)
+  //         if (neighborsEdges.exists(_.connects(n1, n2))) {
+  //           connections += 1
+  //         }
+  //       }
+  //     }
+  //     allowedDimensionality = connections < bridgesCount-1
+  //   }
+  //   allowedDimensionality
+  // }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
     var exists = false

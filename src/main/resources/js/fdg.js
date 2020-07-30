@@ -25,6 +25,7 @@ class ForceDirectedGraph {
 
     this.imageWidth = 30;
     this.hintFontSize = '14px';
+    this.hintColor = 'black';
 
     this.distance = 100;
     this.charge = -70;
@@ -243,6 +244,7 @@ class ForceDirectedGraph {
       .attr("dx", 15)
       .attr("dy", ".05em")
       .attr('stroke-width', .5)
+      .attr('fill', self.hintColor)
       .style('font-size', self.hintFontSize)
       .style('display', self.displayHint ? null : 'none')
       .text((d) => self.nodeHint(d));
