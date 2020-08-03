@@ -5,6 +5,7 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Dataset
 import org.apache.spark.ml.linalg.{Vector => SparkVector}
 import org.apache.spark.sql.functions.udf
+import se.his.sail.ml.GNGModel.Prediction
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -82,18 +83,30 @@ class GNGModel private () extends Serializable {
     unit
   }
 
-  def transform(ds: Dataset[_]): Dataset[_] = {
-    val classify = udf{(col: SparkVector) =>
-      val vec = br.DenseVector(col.toArray)
-      nodes.zipWithIndex.minBy{ case (n, _) => n.distanceTo(vec) }._2
+  def transform(ds: Dataset[_], withDistance: Boolean = false): Dataset[_] = {
+    val classify = if (withDistance) {
+      udf((col: SparkVector) => {
+        val vec = br.DenseVector(col.toArray)
+        nodes.zipWithIndex
+          .map{ case (n, i) => Prediction(i, n.distanceTo(vec)) }
+          .minBy(_.distance)
+      })
+    } else {
+      udf((col: SparkVector) => {
+        val vec = br.DenseVector(col.toArray)
+        nodes.zipWithIndex
+          .minBy{ case (n, _) => n.distanceTo(vec) }
+          ._2
+      })
     }
 
     ds.withColumn(outputCol, classify(ds(inputCol)))
   }
 }
 
+case object GNGModel {
+  case class Prediction (unitId: Int, distance: Double)
 
-object GNGModel {
   def apply(rdd: RDD[br.DenseVector[Double]], maxAge: Double): GNGModel = {
     val samples = rdd.takeSample(false, 2)
     val model = new GNGModel

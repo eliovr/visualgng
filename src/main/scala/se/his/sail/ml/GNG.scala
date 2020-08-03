@@ -22,11 +22,11 @@ class GNG private (
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
                     var maxSignals: Int,
-                    var maxNeighbors: Int,
-                    var maxSteps: Int
+                    var edgeStrengthening: Boolean,
+                    var localizedError: Boolean
                      ) {
 
-  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 0, 6, 2)
+  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 0, false, false)
 
   var inputCol = "features"
 
@@ -95,13 +95,23 @@ class GNG private (
     this
   }
 
+  def setEdgeStrengthening(strengthen: Boolean): this.type = {
+    this.edgeStrengthening = strengthen
+    this
+  }
+
+  def setLocalizedError(localized: Boolean): this.type = {
+    this.localizedError = localized
+    this
+  }
+
   def setMaxNeighbors(n: Int): this.type = {
-    this.maxNeighbors = n
+//    this.maxNeighbors = n
     this
   }
 
   def setMaxSteps(steps: Int): this.type = {
-    this.maxSteps = steps
+//    this.maxSteps = steps
     this
   }
 
@@ -118,8 +128,8 @@ class GNG private (
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
   def getMaxSignals: Int = this.maxSignals
-  def getMaxNeighbors: Int = this.maxNeighbors
-  def getMaxSteps: Int = this.maxSteps
+  def getEdgeStrengthening: Boolean = this.edgeStrengthening
+  def getLocalizedError: Boolean = this.localizedError
 
 
   def fit(ds: Dataset[_]): GNGModel = {
@@ -142,14 +152,22 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, maxSignals, maxNeighbors, maxSteps) _
+      moving, untangle, maxSignals, edgeStrengthening, localizedError) _
 
-    val reduceFit = GNG.fit(-1,
+    // val reduceFit = GNG.fit(-1,
+    //   maxNodes,
+    //   eps_b + eps_b, eps_n,
+    //   maxAge,
+    //   alpha, d, k,
+    //   moving, untangle, 0, edgeStrengthening, localizedError) _
+
+    val reduceFit = GNG.fit(
+      lambda,
       maxNodes,
-      eps_b + eps_b, eps_n,
+      eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, 0, maxNeighbors, maxSteps) _
+      moving, untangle, 0, edgeStrengthening, localizedError) _
 
     val iterations = this.iterations
 
@@ -178,7 +196,7 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, maxSignals, maxNeighbors, maxSteps) _
+      moving, untangle, maxSignals, edgeStrengthening, localizedError) _
 
     var m = model
     for (_ <- 0 until iterations) {
@@ -200,8 +218,8 @@ case object GNG {
           moving: Boolean,
           untangle: Boolean,
           maxSignals: Int,
-          maxNeighbors: Int,
-          maxSteps: Int)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+          edgeStrengthening: Boolean,
+          localizedError: Boolean)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
     var units = model.nodes
     var edges = model.edges
@@ -231,7 +249,12 @@ case object GNG {
         * 4. Add the squared distance between the input signal and
         * the nearest unit in input space to a local counter variable.
         **/
-      unitA.error += distA * distA
+      if (localizedError) {
+        val w = 1 - (1 / edges.count(_.connects(unitA)))
+        unitA.error += (distA * distA) * (1+w)
+      } else {
+        unitA.error += distA * distA
+      }
       unitA.utility += (distB * distB) - (distA * distA)
       unitA.winCounter += 1
 
@@ -271,7 +294,7 @@ case object GNG {
 
         case None =>
           // if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges, maxSteps))) {
-          if (!untangle || isTwoDimensional(unitA, unitB, edges)) {
+          if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkCountCompare(unitB, edges, 3))) {
             edges.append(new Edge(unitA, unitB))
           }
       }
@@ -280,8 +303,11 @@ case object GNG {
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
         **/
-      // edges = edges.filter(_.age <= maxAge)
-      edges = edges.filter(e => e.age <= e.maxAge)
+      edges = if (edgeStrengthening) {
+        edges.filter(e => e.age <= e.maxAge)
+      } else {
+        edges.filter(_.age <= maxAge)
+      }
       units = units.filter(n => edges.exists(_.connects(n)))
 
       /**
@@ -387,31 +413,9 @@ case object GNG {
     }
 
     val abBridgeNodes = getBridges(a, b)
-    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).size <= 1)
+    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).isEmpty)
+//    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).size <= 1)
   }
-
-  // def formsDimensionalObject(a: Node, b: Node, edges: ArrayBuffer[Edge], dimensionality: Int = 2): Boolean = {
-  //   val neighborNodes = edges.filter(_.connects(a)).map(_.getPartner(a))
-  //   val neighborsEdges = edges.filter(e => !e.connects(a) && neighborNodes.exists(e.connects) )
-  //   val bridgeNodes = neighborsEdges.filter(_.connects(b)).map(_.getPartner(b))
-  //   val bridgesCount = bridgeNodes.size
-  //   var allowedDimensionality = bridgesCount > 0 && bridgesCount <= dimensionality
-  //
-  //   if (bridgesCount == dimensionality) {
-  //     var connections = 0
-  //     for (i <- 0 until bridgesCount-1) {
-  //       val n1 = bridgeNodes(i)
-  //       for (j <- i+1 until bridgesCount) {
-  //         val n2 = bridgeNodes(j)
-  //         if (neighborsEdges.exists(_.connects(n1, n2))) {
-  //           connections += 1
-  //         }
-  //       }
-  //     }
-  //     allowedDimensionality = connections < bridgesCount-1
-  //   }
-  //   allowedDimensionality
-  // }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
     var exists = false
@@ -440,15 +444,15 @@ case object GNG {
     exists
   }
 
-  def networkCountCompare(a: Node, edges: ArrayBuffer[Edge], maxNodes: Int = 3): Boolean = {
+  def networkCountCompare(a: Node, edges: ArrayBuffer[Edge], n: Int): Boolean = {
     var openEdges = edges
     var openNodes = ArrayBuffer(a)
     val closedNodes: mutable.Set[Int] = mutable.Set(a.id)
 
-    while (closedNodes.size <= maxNodes && openNodes.nonEmpty) {
+    while (closedNodes.size <= n && openNodes.nonEmpty) {
       var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
 
-      for (u <- openNodes if closedNodes.size <= maxNodes) {
+      for (u <- openNodes if closedNodes.size <= n) {
         nextNodes = openEdges.filter(e => e.connects(u) && !closedNodes.contains(e.getPartner(u).id)).map(_.getPartner(u))
         openEdges = openEdges.filterNot(e => e.connects(u))
         nextNodes.foreach(u => closedNodes.add(u.id))
@@ -456,7 +460,7 @@ case object GNG {
       openNodes = nextNodes
     }
 
-    closedNodes.size <= maxNodes
+    closedNodes.size <= n
   }
 
 }

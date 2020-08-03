@@ -44,6 +44,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   private val gng = new GNG()
     .setIterations(1)
     .setMaxSignals(1000)
+    .setEdgeStrengthening(true)
+    .setLocalizedError(true)
 
   var model: GNGModel = _
 
@@ -215,15 +217,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMax(1)
     .setStep(.1)
 
-  private val maxNeighborsInput: InputNumber = new InputNumber(this.gng.getMaxNeighbors)
-    .setHint("Maximum number of neighbors (connections) a unit can have")
-    .setMin(1)
-    .setStep(1)
+  private val edgeStrengtheningInput: Checkbox = new Checkbox(this.gng.getEdgeStrengthening)
+    .setHint("Whether the edges should be strengthen over time")
 
-  private val maxStepsInput: InputNumber = new InputNumber(this.gng.getMaxSteps)
-    .setHint("How far a neighbor should be in order to allow a connection between them")
-    .setMin(2)
-    .setStep(1)
+  private val localizedErrorInput: Checkbox = new Checkbox(this.gng.getLocalizedError)
+    .setHint("Whether extra error should be given to units with more edges")
 
   /**
     * Text used for displaying the current status of the training.
@@ -271,8 +269,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       .setAlpha(this.alphaInput.get)
       .setD(this.dInput.get)
       .setUntangle(this.untangleInput.get)
-      .setMaxNeighbors(this.maxNeighborsInput.get.toInt)
-      .setMaxSteps(this.maxStepsInput.get.toInt)
+      .setEdgeStrengthening(this.edgeStrengtheningInput.get)
+      .setLocalizedError(this.localizedErrorInput.get)
+      // .setMaxNeighbors(this.maxNeighborsInput.get.toInt)
+      // .setMaxSteps(this.maxStepsInput.get.toInt)
   })
 
   private def preprocessData(): Unit = {
@@ -386,6 +386,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           </button>
           <ul class="dropdown-menu" style="padding: 5px" role="menu" >
 
+            <li class="dropdown-header" onclick="event.stopPropagation();">Untangled
+              <span class="glyphicon glyphicon-info-sign" title={ untangleInput.hint }>&nbsp;</span>
+              { untangleInput.elem }
+            </li>
+
             <li class="dropdown-header">Max epochs
               <span class="glyphicon glyphicon-info-sign" title={ maxEpochsInput.hint }></span>
             </li>
@@ -432,24 +437,17 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             <li class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ dInput.elem }</li>
 
             <li class="divider"></li>
-
-            <li class="dropdown-header" onclick="event.stopPropagation();">Untangled
-              <span class="glyphicon glyphicon-info-sign" title={ untangleInput.hint }>&nbsp;</span>
-              { untangleInput.elem }
+            <li class="dropdown-header" onclick="event.stopPropagation();">Edge str
+              <span class="glyphicon glyphicon-info-sign" title={ edgeStrengtheningInput.hint }>&nbsp;</span>
+              { edgeStrengtheningInput.elem }
             </li>
 
-            <li class="dropdown-header">Max neighbors
-              <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
+            <li class="dropdown-header" onclick="event.stopPropagation();">Local err
+              <span class="glyphicon glyphicon-info-sign" title={ localizedErrorInput.hint }>&nbsp;</span>
+              { localizedErrorInput.elem }
             </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxNeighborsInput.elem }</li>
-
-            <li class="dropdown-header">Max steps
-              <span class="glyphicon glyphicon-info-sign" title="Maximum number of neighbors for each unit"></span>
-            </li>
-            <li class="input-group-sm" onclick="event.stopPropagation();">{ maxStepsInput.elem }</li>
 
             <li class="divider"></li>
-
             <li class="text-center">{ applyButton.elem }</li>
           </ul>
         </div>
@@ -477,12 +475,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       while (this.isTraining) {
         val time = Utils.performance {
           /** Optimizer (O). */
-          // this.model.nodes.foreach(n => {
-          //   n.error = 0
-          //   n.winCounter = 0
-          //   n.utility = 0
-          // })
-          // this.model.edges.foreach(_.age = 0)
           this.model = gng.fit(rdd, this.model)
         }
 
@@ -565,32 +557,81 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * Returns a DataFrame with each data point assigned to its closest unit.
     * */
   def transform(updateGraph: Boolean = false): Dataset[_] = {
-    val predictions = this.model.transform(df)
+    val predictions = this.model.transform(df, withDistance = true)
+    val unitCol = model.getOutputCol + ".unitId"
+    val distanceCol = model.getOutputCol + ".distance"
 
     if (updateGraph) {
       import org.apache.spark.sql.functions._
+      import org.apache.spark.sql.expressions.Window
       import spark.implicits._
 
-      val stats: Array[(Int, Long, String)] = this.labelCol match {
-        case Some(label) =>
-          predictions
-            .groupBy(model.outputCol)
-            .agg(collect_list(label))
-            .map{
-              case Row(unitId: Int, labels: Seq[_]) =>
-                val label = labels
-                  .groupBy(identity)
-                  .maxBy(_._2.size)._1
-                (unitId, labels.size.toLong, label.toString)
-            }
-            .collect()
-        case None =>
-          predictions
-            .groupBy(model.getOutputCol)
-            .count()
-            .map(row => (row.getInt(0), row.getLong(1), ""))
-            .collect()
+      val stats: Array[(Int, Long, String)] = if (this.labelCol.nonEmpty) {
+        predictions.groupBy(unitCol)
+          .agg(collect_list(labelCol.get))
+          .map{
+            case Row(unitId: Int, labels: Seq[_]) =>
+              val label = labels
+                .groupBy(identity)
+                .maxBy(_._2.size)._1
+              (unitId, labels.size.toLong, label.toString)
+          }
+          .collect()
+      }else if (this.idCol.nonEmpty) {
+        val w = Window.partitionBy(unitCol)
+        predictions
+          .select(
+            col(unitCol),
+            col(distanceCol),
+            col(this.idCol.get),
+            count(col(this.idCol.get)).over(w).as("counts"),
+            min(distanceCol).over(w).as("min_distance")
+          )
+          .where(s"$distanceCol = min_distance")
+          .map{
+            case Row(unitId: Int, _, rowId: String, counts: Long, _) =>
+              (unitId, counts, rowId)
+          }
+          .collect()
+      } else {
+        predictions
+          .groupBy(unitCol)
+          .count()
+          .map(row => (row.getInt(0), row.getLong(1), ""))
+          .collect()
       }
+
+      //      val stats: Array[(Int, Long, String)] = this.labelCol match {
+//        case Some(label) =>
+//          predictions
+//            .groupBy(model.outputCol)
+//            .agg(collect_list(label))
+//            .map{
+//              case Row(unitId: Int, labels: Seq[_]) =>
+//                val label = labels
+//                  .groupBy(identity)
+//                  .maxBy(_._2.size)._1
+//                (unitId, labels.size.toLong, label.toString)
+//            }
+//            .collect()
+//        case None =>
+//          if (idCol.nonEmpty) {
+//            predictions
+//              .groupBy(model.outputCol)
+//              .agg(count(idCol.get), first(idCol.get))
+//              .map{
+//                case Row(unitId: Int, rowCount: Long, firstId: String) =>
+//                  (unitId, rowCount, firstId)
+//              }
+//              .collect()
+//          } else {
+//            predictions
+//              .groupBy(model.getOutputCol)
+//              .count()
+//              .map(row => (row.getInt(0), row.getLong(1), ""))
+//              .collect()
+//          }
+//      }
 
       this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
         stats.find(_._1 == i) match {
