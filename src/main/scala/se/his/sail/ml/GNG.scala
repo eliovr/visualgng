@@ -21,12 +21,11 @@ class GNG private (
                     var k: Double,
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
-                    var maxSignals: Int,
-                    var edgeStrengthening: Boolean,
-                    var localizedError: Boolean
+                    var sampleSignals: Double, // fraction of the total amount of signals to be sampled during training.
+                    var minNetSize: Int // minimum size (i.e., number of units) of a network.
                      ) {
 
-  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 0, false, false)
+  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 1, 2)
 
   var inputCol = "features"
 
@@ -90,28 +89,13 @@ class GNG private (
     this
   }
 
-  def setMaxSignals(maxSignals: Int): this.type = {
-    this.maxSignals = maxSignals
+  def setSampleSignals(fraction: Double): this.type = {
+    this.sampleSignals = fraction
     this
   }
 
-  def setEdgeStrengthening(strengthen: Boolean): this.type = {
-    this.edgeStrengthening = strengthen
-    this
-  }
-
-  def setLocalizedError(localized: Boolean): this.type = {
-    this.localizedError = localized
-    this
-  }
-
-  def setMaxNeighbors(n: Int): this.type = {
-//    this.maxNeighbors = n
-    this
-  }
-
-  def setMaxSteps(steps: Int): this.type = {
-//    this.maxSteps = steps
+  def setMinNetSize(minNetSize: Int): this.type = {
+    this.minNetSize = minNetSize
     this
   }
 
@@ -127,16 +111,18 @@ class GNG private (
   def isMoving: Boolean = this.moving
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
-  def getMaxSignals: Int = this.maxSignals
-  def getEdgeStrengthening: Boolean = this.edgeStrengthening
-  def getLocalizedError: Boolean = this.localizedError
+  def getSampleSignals: Double = this.sampleSignals
+  def getMinNetSize: Int = this.minNetSize
 
 
   def fit(ds: Dataset[_]): GNGModel = {
-    val rdd = ds.select(this.inputCol).rdd.map{
-      case Row(f: SparkVector) => new br.DenseVector(f.toArray)
-    }.persist()
+    val rdd = ds
+      .select(this.inputCol)
+      .rdd.map{
+        case Row(f: SparkVector) => new br.DenseVector(f.toArray)
+      }
 
+    rdd.persist()
     val model = this.fit(rdd)
     rdd.unpersist()
 
@@ -152,14 +138,7 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, maxSignals, edgeStrengthening, localizedError) _
-
-    // val reduceFit = GNG.fit(-1,
-    //   maxNodes,
-    //   eps_b + eps_b, eps_n,
-    //   maxAge,
-    //   alpha, d, k,
-    //   moving, untangle, 0, edgeStrengthening, localizedError) _
+      moving, untangle, sampleSignals, minNetSize) _
 
     val reduceFit = GNG.fit(
       lambda,
@@ -167,42 +146,44 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, 0, edgeStrengthening, localizedError) _
+      moving, untangle, 1, minNetSize) _
 
-    val iterations = this.iterations
+    var finalModel = model
 
-    val models: RDD[GNGModel] = rdd.mapPartitions[GNGModel]{ next: Iterator[br.DenseVector[Double]] =>
-      val signals = next.toArray
-      var _model = model
-
-      for (_ <- 0 until iterations) {
-        _model = mapFit(_model, signals)
-      }
-
-      Seq(_model).iterator
+    // Training...
+    for (_ <- 0 until this.iterations) {
+      finalModel = rdd
+        .mapPartitions[GNGModel]((signals: Iterator[br.DenseVector[Double]]) => {
+          val signalsArr = signals.toArray
+          val partitionModel = mapFit(finalModel, signalsArr)
+          Seq(partitionModel).iterator
+        })
+        .reduce{ (acc: GNGModel, m: GNGModel) =>
+          reduceFit(acc, m.nodes.map(_.prototype))
+        }
     }
 
-    models.reduce{ (acc: GNGModel, m: GNGModel) =>
-      reduceFit(acc, m.nodes.map(_.prototype))
-    }.setInputCol(this.inputCol)
+    finalModel.setInputCol(this.inputCol)
   }
 
-  def fitSequential(arr: Seq[br.DenseVector[Double]]): GNGModel = fitSequential(arr, GNGModel(arr))
+  def fitSequential(signals: Seq[br.DenseVector[Double]]): GNGModel = fitSequential(signals, GNGModel(signals))
 
-  def fitSequential(arr: Seq[br.DenseVector[Double]], model: GNGModel): GNGModel = {
+  def fitSequential(signals: Seq[br.DenseVector[Double]], model: GNGModel): GNGModel = {
     val optimize = GNG.fit(
       lambda,
       maxNodes,
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, maxSignals, edgeStrengthening, localizedError) _
+      moving, untangle, sampleSignals, minNetSize) _
 
-    var m = model
+    var finalModel = model
+
     for (_ <- 0 until iterations) {
-      m = optimize(m, arr)
+      finalModel = optimize(finalModel, signals)
     }
-    m
+
+    finalModel.setInputCol(this.inputCol)
   }
 }
 
@@ -217,15 +198,16 @@ case object GNG {
           k: Double,
           moving: Boolean,
           untangle: Boolean,
-          maxSignals: Int,
-          edgeStrengthening: Boolean,
-          localizedError: Boolean)(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
+          sampleSignals: Double,
+          minNetSize: Int
+         )(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
     var units = model.nodes
     var edges = model.edges
     val totalSignals = inputSignals.size
     val signalIterator = inputSignals.iterator
     var signalCounter = 0
+    val maxSignals: Int = if (sampleSignals >= 1) 0 else (sampleSignals * totalSignals).toInt
 
     while((maxSignals <= 0 && signalIterator.hasNext) || (maxSignals > 0 && signalCounter < maxSignals)) {
       val signal = if (maxSignals > 0) {
@@ -249,12 +231,7 @@ case object GNG {
         * 4. Add the squared distance between the input signal and
         * the nearest unit in input space to a local counter variable.
         **/
-      if (localizedError) {
-        val w = 1 - (1 / edges.count(_.connects(unitA)))
-        unitA.error += (distA * distA) * (1+w)
-      } else {
-        unitA.error += distA * distA
-      }
+      unitA.error += distA * distA
       unitA.utility += (distB * distB) - (distA * distA)
       unitA.winCounter += 1
 
@@ -266,22 +243,15 @@ case object GNG {
         **/
       unitA.moveTowards(signal, eps_b)
 
-      var countA, countB = 0  // use counts for disentanglement.
       var abEdge: Option[Edge] = None
-
-      edges.foreach { e =>
+      edges.foreach(e => {
         if (e.connects(unitA)) {
           e.age += 1
-          e.getPartner(unitA).moveTowards(signal, eps_n)
-          countA += 1
-        } else if (e.connects(unitB)) {
-          countB += 1
-        }
+          e.getPartnerOf(unitA).moveTowards(signal, eps_n)
 
-        if (e.connects(unitA, unitB)) {
-          abEdge = Some(e)
+          if (e.connects(unitB)) abEdge = Some(e)
         }
-      }
+      })
 
       /**
         * 6. If S1 and S2 are connected by an edge, set the age of this
@@ -293,8 +263,7 @@ case object GNG {
           e.maxAge += 1 / maxAge.toDouble
 
         case None =>
-          // if (!untangle || (countA <= maxNeighbors  && countB <= maxNeighbors && areCloseNeighbors(unitA, unitB, edges, maxSteps))) {
-          if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkCountCompare(unitB, edges, 3))) {
+          if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkCountCompare(unitB, edges, minNetSize))) {
             edges.append(new Edge(unitA, unitB))
           }
       }
@@ -303,7 +272,7 @@ case object GNG {
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
         **/
-      edges = if (edgeStrengthening) {
+      edges = if (untangle) {
         edges.filter(e => e.age <= e.maxAge)
       } else {
         edges.filter(_.age <= maxAge)
@@ -349,8 +318,8 @@ case object GNG {
             **/
           val f = edges
             .filter(_.connects(q))
-            .maxBy(_.getPartner(q).error)
-            .getPartner(q)
+            .maxBy(_.getPartnerOf(q).error)
+            .getPartnerOf(q)
 
           val newVector = (q.prototype + f.prototype) * .5
           val r = model.createUnit(newVector)
@@ -394,7 +363,7 @@ case object GNG {
       for (u <- openNodes if neighborsCount <= 1) {
         neighborsCount += openEdges.count(_.connects(u, b))
         if (neighborsCount <= 1) {
-          nextUnits = openEdges.filter(_.connects(u)).map(_.getPartner(u))
+          nextUnits = openEdges.filter(_.connects(u)).map(_.getPartnerOf(u))
           openEdges = openEdges.filterNot(_.connects(u))
         }
       }
@@ -407,14 +376,13 @@ case object GNG {
 
   def isTwoDimensional(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
     def getBridges(x: Node, y: Node): ArrayBuffer[Node] = {
-      val neighborNodes = edges.filter(_.connects(x)).map(_.getPartner(x))
+      val neighborNodes = edges.filter(_.connects(x)).map(_.getPartnerOf(x))
       val neighborsEdges = edges.filter(e => !e.connects(x) && neighborNodes.exists(e.connects) )
-      neighborsEdges.filter(_.connects(y)).map(_.getPartner(y))
+      neighborsEdges.filter(_.connects(y)).map(_.getPartnerOf(y))
     }
 
     val abBridgeNodes = getBridges(a, b)
     abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).isEmpty)
-//    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).size <= 1)
   }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
@@ -431,7 +399,7 @@ case object GNG {
         if (!exists) {
           nextNodes = openEdges
             .filter(_.connects(u))
-            .map(_.getPartner(u))
+            .map(_.getPartnerOf(u))
             .filterNot(closedNodes.contains)
 
           openEdges = openEdges.filterNot(_.connects(u))
@@ -453,7 +421,7 @@ case object GNG {
       var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
 
       for (u <- openNodes if closedNodes.size <= n) {
-        nextNodes = openEdges.filter(e => e.connects(u) && !closedNodes.contains(e.getPartner(u).id)).map(_.getPartner(u))
+        nextNodes = openEdges.filter(e => e.connects(u) && !closedNodes.contains(e.getPartnerOf(u).id)).map(_.getPartnerOf(u))
         openEdges = openEdges.filterNot(e => e.connects(u))
         nextNodes.foreach(u => closedNodes.add(u.id))
       }

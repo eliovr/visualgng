@@ -43,9 +43,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val gng = new GNG()
     .setIterations(1)
-    .setMaxSignals(1000)
-    .setEdgeStrengthening(true)
-    .setLocalizedError(true)
 
   var model: GNGModel = _
 
@@ -172,11 +169,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMin(1)
     .setStep(5)
 
-  private val maxSignalsInput: InputNumber = new InputNumber(this.gng.maxSignals / 1000)
-    .setHint("Maximum number of signals (data points) taken by each Spark partition (0 = all)")
-    .setMin(0)
-    .setMax(20)
-    .setStep(1)
+  private val maxSignalsInput: InputNumber = new InputNumber(this.gng.sampleSignals)
+    .setHint("Fraction of the total amount of signals to be sampled during training (1 == all)")
+    .setMin(.0)
+    .setMax(1)
+    .setStep(.1)
 
   private val maxNodesInput: InputNumber = new InputNumber(this.gng.getMaxNodes)
     .setHint("Maximum number of units")
@@ -217,11 +214,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMax(1)
     .setStep(.1)
 
-  private val edgeStrengtheningInput: Checkbox = new Checkbox(this.gng.getEdgeStrengthening)
-    .setHint("Whether the edges should be strengthen over time")
-
-  private val localizedErrorInput: Checkbox = new Checkbox(this.gng.getLocalizedError)
-    .setHint("Whether extra error should be given to units with more edges")
+  private val minNetSizeInput: InputNumber = new InputNumber(this.gng.getMinNetSize)
+    .setHint("Tell GNG to let bigger nets absorb those of this given size (0 = any size)")
+    .setMin(0)
+    .setMax(5)
+    .setStep(1)
 
   /**
     * Text used for displaying the current status of the training.
@@ -260,7 +257,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
     this.gng
-      .setMaxSignals((this.maxSignalsInput.get * 1000).toInt)
+      .setSampleSignals(this.maxSignalsInput.get)
       .setMaxNodes(this.maxNodesInput.get.toInt)
       .setMaxAge(this.maxAgeInput.get.toInt)
       .setLambda(this.lambdaInput.get.toInt)
@@ -269,10 +266,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       .setAlpha(this.alphaInput.get)
       .setD(this.dInput.get)
       .setUntangle(this.untangleInput.get)
-      .setEdgeStrengthening(this.edgeStrengtheningInput.get)
-      .setLocalizedError(this.localizedErrorInput.get)
-      // .setMaxNeighbors(this.maxNeighborsInput.get.toInt)
-      // .setMaxSteps(this.maxStepsInput.get.toInt)
+      .setMinNetSize(this.minNetSizeInput.get.toInt)
   })
 
   private def preprocessData(): Unit = {
@@ -396,7 +390,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             </li>
             <li class="input-group-sm" onclick="event.stopPropagation();">{ maxEpochsInput.elem }</li>
 
-            <li class="dropdown-header">Max signals (thousands)
+            <li class="dropdown-header">Sample signals
               <span class="glyphicon glyphicon-info-sign" title={ maxSignalsInput.hint }></span>
             </li>
             <li class="input-group-sm" onclick="event.stopPropagation();">{ maxSignalsInput.elem }</li>
@@ -436,16 +430,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
             </li>
             <li class="input-group-sm" onclick="event.stopPropagation();" style="display: None">{ dInput.elem }</li>
 
-            <li class="divider"></li>
-            <li class="dropdown-header" onclick="event.stopPropagation();">Edge str
-              <span class="glyphicon glyphicon-info-sign" title={ edgeStrengtheningInput.hint }>&nbsp;</span>
-              { edgeStrengtheningInput.elem }
+            <li class="dropdown-header">Min net size
+              <span class="glyphicon glyphicon-info-sign" title={ minNetSizeInput.hint }></span>
             </li>
-
-            <li class="dropdown-header" onclick="event.stopPropagation();">Local err
-              <span class="glyphicon glyphicon-info-sign" title={ localizedErrorInput.hint }>&nbsp;</span>
-              { localizedErrorInput.elem }
-            </li>
+            <li class="input-group-sm" onclick="event.stopPropagation();">{ minNetSizeInput.elem }</li>
 
             <li class="divider"></li>
             <li class="text-center">{ applyButton.elem }</li>
@@ -472,10 +460,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.rdd.persist()
 
     try {
+//      val arr = this.rdd.collect()
       while (this.isTraining) {
         val time = Utils.performance {
           /** Optimizer (O). */
           this.model = gng.fit(rdd, this.model)
+//          this.model = gng.fitSequential(arr, this.model)
         }
 
         accTime += time
@@ -577,7 +567,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
               (unitId, labels.size.toLong, label.toString)
           }
           .collect()
-      }else if (this.idCol.nonEmpty) {
+      } else if (this.idCol.nonEmpty) {
         val w = Window.partitionBy(unitCol)
         predictions
           .select(
@@ -600,38 +590,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .map(row => (row.getInt(0), row.getLong(1), ""))
           .collect()
       }
-
-      //      val stats: Array[(Int, Long, String)] = this.labelCol match {
-//        case Some(label) =>
-//          predictions
-//            .groupBy(model.outputCol)
-//            .agg(collect_list(label))
-//            .map{
-//              case Row(unitId: Int, labels: Seq[_]) =>
-//                val label = labels
-//                  .groupBy(identity)
-//                  .maxBy(_._2.size)._1
-//                (unitId, labels.size.toLong, label.toString)
-//            }
-//            .collect()
-//        case None =>
-//          if (idCol.nonEmpty) {
-//            predictions
-//              .groupBy(model.outputCol)
-//              .agg(count(idCol.get), first(idCol.get))
-//              .map{
-//                case Row(unitId: Int, rowCount: Long, firstId: String) =>
-//                  (unitId, rowCount, firstId)
-//              }
-//              .collect()
-//          } else {
-//            predictions
-//              .groupBy(model.getOutputCol)
-//              .count()
-//              .map(row => (row.getInt(0), row.getLong(1), ""))
-//              .collect()
-//          }
-//      }
 
       this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
         stats.find(_._1 == i) match {

@@ -45,7 +45,7 @@ class Edge(
 
   def connects(a: Node, b: Node): Boolean = connects(a) && connects(b)
 
-  def getPartner(u: Node): Node =
+  def getPartnerOf(u: Node): Node =
     if (source.id == u.id) target
     else source
 
