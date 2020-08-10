@@ -19,6 +19,7 @@ class Node( val id: Int,
   def this(id: Int, prototype: br.DenseVector[Double]) = this(id, prototype, 0, 0, 0)
 
   var label: Option[String] = None
+  var certainty: Double = 0
 
   def setLabel(label: String): this.type = {
     this.label = Some(label)

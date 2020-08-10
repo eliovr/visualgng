@@ -11,7 +11,7 @@ import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.zeppelin.display.angular.notebookscope.AngularElem._
 import org.slf4j.LoggerFactory
 import se.his.sail.ml._
-import se.his.sail.common.{JSONArray, JSONObject, Utils, FeaturesSummary}
+import se.his.sail.common.{FeaturesSummary, JSONArray, JSONObject, Utils}
 
 /**
   * A Visual Analytics library for the Growning Neural Gas (GNG) algorithm (Fritzke)
@@ -337,7 +337,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .as[(SparkVector, SparkVector)]
         .first()
 
-      this.features = FeaturesSummary(featureNames, min.toArray, max.toArray)
+      this.features = FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, .1 +: max.toArray)
       this.fdg.setFeatures(this.features)
       this.pc.setFeatures(this.features)
     }
@@ -514,7 +514,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       val obj = JSONObject()
         .setAttr("id", n.id)
         .setAttr("density", n.winCounter)
-        .setAttr("data", JSONArray(n.prototype.toArray))
+        .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
 
       n.label match {
         case Some(x) => obj.setAttr("hint", x)
@@ -556,15 +556,15 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       import org.apache.spark.sql.expressions.Window
       import spark.implicits._
 
-      val stats: Array[(Int, Long, String)] = if (this.labelCol.nonEmpty) {
+      val stats: Array[(Int, Long, Double, String)] = if (this.labelCol.nonEmpty) {
         predictions.groupBy(unitCol)
           .agg(collect_list(labelCol.get))
           .map{
             case Row(unitId: Int, labels: Seq[_]) =>
-              val label = labels
-                .groupBy(identity)
-                .maxBy(_._2.size)._1
-              (unitId, labels.size.toLong, label.toString)
+              val groupedLabels = labels.groupBy(identity)
+              val certainty = 1 / groupedLabels.size.toDouble
+              val label = groupedLabels.maxBy(_._2.size)._1
+              (unitId, labels.size.toLong, certainty, label.toString)
           }
           .collect()
       } else if (this.idCol.nonEmpty) {
@@ -580,23 +580,25 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .where(s"$distanceCol = min_distance")
           .map{
             case Row(unitId: Int, _, rowId: String, counts: Long, _) =>
-              (unitId, counts, rowId)
+              (unitId, counts, .0, rowId)
           }
           .collect()
       } else {
         predictions
           .groupBy(unitCol)
           .count()
-          .map(row => (row.getInt(0), row.getLong(1), ""))
+          .map(row => (row.getInt(0), row.getLong(1), .0, ""))
           .collect()
       }
 
       this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
         stats.find(_._1 == i) match {
-          case Some((_, count, label)) =>
+          case Some((_, count, certainty, label)) =>
             n.winCounter = count
-            if (label.nonEmpty)
+            if (label.nonEmpty){
               n.setLabel(label)
+              n.certainty = certainty
+            }
           case None =>
             n.winCounter = 0
         }

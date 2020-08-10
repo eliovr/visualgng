@@ -220,12 +220,30 @@ case object GNG {
     /**
         * 2. Find the nearest unit S1 and the second-nearest unit S2.
         **/
-      val distances = units
-        .map(n => (n, n.distanceTo(signal)))
-        .sortBy(_._2)
+      var unitA, unitB: Node = null
+      var distA, distB: Double = Double.MaxValue
 
-      val (unitA, distA): (Node, Double) = distances.head
-      val (unitB, distB): (Node, Double) = distances.tail.head
+      for (u <- units) {
+        val d = u.distanceTo(signal)
+        if (d < distA) {
+          if (distA < distB) {
+            distB = distA
+            unitB = unitA
+          }
+          distA = d
+          unitA = u
+        } else if (d < distB) {
+          distB = d
+          unitB = u
+        }
+      }
+
+//      val distances = units
+//        .map(n => (n, n.distanceTo(signal)))
+//        .sortBy(_._2)
+
+//      val (unitA, distA): (Node, Double) = distances.head
+//      val (unitB, distB): (Node, Double) = distances.tail.head
 
       /**
         * 4. Add the squared distance between the input signal and
@@ -263,7 +281,7 @@ case object GNG {
           e.maxAge += 1 / maxAge.toDouble
 
         case None =>
-          if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkCountCompare(unitB, edges, minNetSize))) {
+          if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkSizeCompare(unitB, edges, minNetSize))) {
             edges.append(new Edge(unitA, unitB))
           }
       }
@@ -376,13 +394,16 @@ case object GNG {
 
   def isTwoDimensional(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
     def getBridges(x: Node, y: Node): ArrayBuffer[Node] = {
-      val neighborNodes = edges.filter(_.connects(x)).map(_.getPartnerOf(x))
-      val neighborsEdges = edges.filter(e => !e.connects(x) && neighborNodes.exists(e.connects) )
-      neighborsEdges.filter(_.connects(y)).map(_.getPartnerOf(y))
+      for (
+        e <- edges if e.connects(x) ;
+        val n = e.getPartnerOf(x) ;
+        if edges.exists(_.connects(n, y))
+      ) yield n
     }
 
     val abBridgeNodes = getBridges(a, b)
-    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).isEmpty)
+//    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).isEmpty)
+    abBridgeNodes.size == 1 || (abBridgeNodes.nonEmpty && abBridgeNodes.forall(n => getBridges(n, b).isEmpty))
   }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
@@ -412,7 +433,7 @@ case object GNG {
     exists
   }
 
-  def networkCountCompare(a: Node, edges: ArrayBuffer[Edge], n: Int): Boolean = {
+  def networkSizeCompare(a: Node, edges: ArrayBuffer[Edge], n: Int): Boolean = {
     var openEdges = edges
     var openNodes = ArrayBuffer(a)
     val closedNodes: mutable.Set[Int] = mutable.Set(a.id)
