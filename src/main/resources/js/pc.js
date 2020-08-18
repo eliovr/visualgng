@@ -101,7 +101,7 @@ class ParallelCoordinates {
 
   onFilter(elems) {
     if (this.datahub != null && typeof this.datahub != 'undefined') {
-      this.datahub.notifySelected(elems, this);
+      this.datahub.notifySelected(elems.data(), this);
     }
   }
 

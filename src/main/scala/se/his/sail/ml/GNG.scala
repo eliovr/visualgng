@@ -25,7 +25,7 @@ class GNG private (
                     var minNetSize: Int // minimum size (i.e., number of units) of a network.
                      ) {
 
-  def this() = this(15, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 1, 2)
+  def this() = this(15, 100, 100, .2, .006, 25, .5, .995, 0, false, true, 1, 3)
 
   var inputCol = "features"
 
@@ -129,7 +129,7 @@ class GNG private (
     model
   }
 
-  def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd, maxAge=maxAge))
+  def fit(rdd: RDD[br.DenseVector[Double]]): GNGModel = this.fit(rdd, GNGModel(rdd))
 
   def fit(rdd: RDD[br.DenseVector[Double]], model: GNGModel): GNGModel = {
     val mapFit = GNG.fit(
@@ -238,13 +238,6 @@ case object GNG {
         }
       }
 
-//      val distances = units
-//        .map(n => (n, n.distanceTo(signal)))
-//        .sortBy(_._2)
-
-//      val (unitA, distA): (Node, Double) = distances.head
-//      val (unitB, distB): (Node, Double) = distances.tail.head
-
       /**
         * 4. Add the squared distance between the input signal and
         * the nearest unit in input space to a local counter variable.
@@ -278,7 +271,6 @@ case object GNG {
       abEdge match {
         case Some(e) =>
           e.age = 0
-          e.maxAge += 1 / maxAge.toDouble
 
         case None =>
           if (!untangle || (isTwoDimensional(unitA, unitB, edges) || networkSizeCompare(unitB, edges, minNetSize))) {
@@ -290,11 +282,7 @@ case object GNG {
         * 7. Remove edges with an age larger than maxAge. If this results in
         * points having no emanating edges, remove them as well.
         **/
-      edges = if (untangle) {
-        edges.filter(e => e.age <= e.maxAge)
-      } else {
-        edges.filter(_.age <= maxAge)
-      }
+      edges = edges.filter(_.age <= maxAge)
       units = units.filter(n => edges.exists(_.connects(n)))
 
       /**
@@ -348,8 +336,8 @@ case object GNG {
             * and remove the original edge between q and f.
             **/
           edges = edges.filterNot(_.connects(q, f))
-          edges.append(new Edge(q, r, maxAge=maxAge))
-          edges.append(new Edge(f, r, maxAge=maxAge))
+          edges.append(new Edge(q, r))
+          edges.append(new Edge(f, r))
 
           /**
             * Decrease the error variables of q and f by multiplying them
@@ -393,17 +381,19 @@ case object GNG {
   }
 
   def isTwoDimensional(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
-    def getBridges(x: Node, y: Node): ArrayBuffer[Node] = {
+    def getBridges(x: Node, y: Node, links: ArrayBuffer[Edge] = edges): ArrayBuffer[Node] = {
       for (
-        e <- edges if e.connects(x) ;
+        e <- links if e.connects(x) ;
         val n = e.getPartnerOf(x) ;
-        if edges.exists(_.connects(n, y))
+        if links.exists(_.connects(n, y))
       ) yield n
     }
 
-    val abBridgeNodes = getBridges(a, b)
-//    abBridgeNodes.size == 1 || abBridgeNodes.exists(n => getBridges(n, b).isEmpty)
-    abBridgeNodes.size == 1 || (abBridgeNodes.nonEmpty && abBridgeNodes.forall(n => getBridges(n, b).isEmpty))
+    val bridges = getBridges(a, b)
+    val bridgesEdges = edges.filter(e => !e.connects(a) && bridges.exists(e.connects))
+
+//    bridges.size == 1 || (bridges.nonEmpty && bridges.forall(n => getBridges(n, b).isEmpty))
+    bridges.size == 1 || (bridges.nonEmpty && bridges.forall(n => getBridges(n, b, bridgesEdges).isEmpty))
   }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
@@ -413,21 +403,32 @@ case object GNG {
     val closedNodes: ArrayBuffer[Node] = ArrayBuffer.empty
 
     while (!exists && openEdges.nonEmpty) {
-      var nextNodes: ArrayBuffer[Node] = ArrayBuffer.empty
+      val auxNodes: ArrayBuffer[Node] = ArrayBuffer.empty
+      val iterator = openNodes.iterator
 
-      for (u <- openNodes if !exists) {
+      while (!exists && iterator.hasNext) {
+        val u = iterator.next()
         exists = openEdges.exists(_.connects(u, b))
-        if (!exists) {
-          nextNodes = openEdges
-            .filter(_.connects(u))
-            .map(_.getPartnerOf(u))
-            .filterNot(closedNodes.contains)
+        closedNodes.append(u)
 
-          openEdges = openEdges.filterNot(_.connects(u))
+        if (!exists) {
+          val auxEdges: ArrayBuffer[Edge] = ArrayBuffer.empty
+
+          for (e <- openEdges) {
+            if (e.connects(u)) {
+              val p = e.getPartnerOf(u)
+              if (!closedNodes.contains(p)) {
+                auxNodes.append(p)
+              }
+            } else {
+              auxEdges.append(e)
+            }
+          }
+
+          openEdges = auxEdges
         }
       }
-      closedNodes ++= openNodes
-      openNodes = nextNodes
+      openNodes = auxNodes
     }
 
     exists

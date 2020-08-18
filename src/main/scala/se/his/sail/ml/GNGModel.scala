@@ -37,10 +37,10 @@ class Node( val id: Int,
 
 class Edge(
             val source: Node,
-            val target: Node,
-            var age: Double = 0,
-            var maxAge: Double = 25
+            val target: Node
           ) extends Serializable {
+
+  var age: Double = 0
 
   def connects(u: Node): Boolean = target.id == u.id || source.id == u.id
 
@@ -108,12 +108,12 @@ class GNGModel private () extends Serializable {
 case object GNGModel {
   case class Prediction (unitId: Int, distance: Double)
 
-  def apply(rdd: RDD[br.DenseVector[Double]], maxAge: Double): GNGModel = {
+  def apply(rdd: RDD[br.DenseVector[Double]]): GNGModel = {
     val samples = rdd.takeSample(false, 2)
     val model = new GNGModel
     val a = model.createUnit(samples(0))
     val b = model.createUnit(samples(1))
-    model.edges.append(new Edge(a, b, maxAge=maxAge))
+    model.edges.append(new Edge(a, b))
 
     model
   }

@@ -68,27 +68,6 @@ class DataHub {
     }
   }
 
-  notifyMouseclick(d, caller) {
-    let index = this.selected.findIndex((e) => {
-      return d.id == e.id;
-    });
-
-    if (index >= 0) {
-      this.selected.splice(index, 1);
-    } else {
-      this.selected.push(d);
-    }
-
-    this.saveToOutputBucket(this.selected.map((e) => { return e.id }));
-
-    for (var i = 0; i < this.listeners.length; i++) {
-      const listener = this.listeners[i];
-      if (listener.id != caller.id && typeof listener.listenMouseclick !== 'undefined') {
-        listener.listenMouseclick(d, caller, this.selected);
-      }
-    }
-  }
-
   notifySelected(selectedElems, caller) {
     this.selected = selectedElems || [];
 
@@ -99,7 +78,7 @@ class DataHub {
       }
     }
 
-    this.saveToOutputBucket(this.selected.map((e) => { return e.id }));
+    this.saveToOutputBucket(this.selected.map((e) => { return e.trueId }));
   }
 
   saveToOutputBucket(data) {

@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory
 import se.his.sail.ml._
 import se.his.sail.common.{FeaturesSummary, JSONArray, JSONObject, Utils}
 
+import scala.collection.mutable
+
 /**
   * A Visual Analytics library for the Growning Neural Gas (GNG) algorithm (Fritzke)
   * for Apache Zeppelin.
@@ -356,7 +358,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.isTraining = false
     this.epochs = 0
     this.accTime = .0
-    this.model = GNGModel(this.rdd, maxAge=this.gng.maxAge)
+    this.model = GNGModel(this.rdd)
 
     updateGraph()
     this.statusText.set("Click Run to start training")
@@ -510,14 +512,20 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   private def updateGraph(): Unit = {
-    val nodes: Iterable[JSONObject] = this.model.nodes.map{n =>
+    val labels: mutable.Map[String, Int] = mutable.Map.empty
+
+    val nodes: Iterable[JSONObject] = this.model.nodes.zipWithIndex.map{case (n, i) =>
       val obj = JSONObject()
         .setAttr("id", n.id)
+        .setAttr("trueId", i)
         .setAttr("density", n.winCounter)
         .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
 
       n.label match {
-        case Some(x) => obj.setAttr("hint", x)
+        case Some(x) =>
+          obj
+            .setAttr("hint", x.toString)
+            .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
         case None => obj
       }
     }
@@ -548,7 +556,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * */
   def transform(updateGraph: Boolean = false): Dataset[_] = {
     val predictions = this.model.transform(df, withDistance = true)
-    val unitCol = model.getOutputCol + ".unitId"
+    val unitIdCol = model.getOutputCol + ".unitId"
     val distanceCol = model.getOutputCol + ".distance"
 
     if (updateGraph) {
@@ -557,7 +565,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       import spark.implicits._
 
       val stats: Array[(Int, Long, Double, String)] = if (this.labelCol.nonEmpty) {
-        predictions.groupBy(unitCol)
+        predictions.groupBy(unitIdCol)
           .agg(collect_list(labelCol.get))
           .map{
             case Row(unitId: Int, labels: Seq[_]) =>
@@ -568,13 +576,14 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           }
           .collect()
       } else if (this.idCol.nonEmpty) {
-        val w = Window.partitionBy(unitCol)
+        val w = Window.partitionBy(unitIdCol)
+        val idCol = this.idCol.get
         predictions
           .select(
-            col(unitCol),
+            col(unitIdCol),
             col(distanceCol),
-            col(this.idCol.get),
-            count(col(this.idCol.get)).over(w).as("counts"),
+            col(idCol),
+            count(col(idCol)).over(w).as("counts"),
             min(distanceCol).over(w).as("min_distance")
           )
           .where(s"$distanceCol = min_distance")
@@ -585,7 +594,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .collect()
       } else {
         predictions
-          .groupBy(unitCol)
+          .groupBy(unitIdCol)
           .count()
           .map(row => (row.getInt(0), row.getLong(1), .0, ""))
           .collect()

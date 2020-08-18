@@ -10,8 +10,8 @@ class ForceDirectedGraph {
     this.width = params.width || 600;
     this.height = params.height || 600;
 
-    this.selectedCounter = 0;
-    this.cat10 = d3.scale.category10().domain(d3.range(10));
+    this.selected = [];
+    this.cat10 = d3.scale.category20()//.domain(d3.range(10));
 
     this.withImages = params.withImages || false;
     this.displayHint = true;
@@ -168,7 +168,7 @@ class ForceDirectedGraph {
     // ---------------- nodes
 
     function onMouseover(d) {
-        if (self.selectedCounter > 0 && !d.selected)
+        if (self.selected.length > 0 && !d.selected)
           d3.select(this).style('opacity', null);
 
         if (self.datahub != null && typeof self.datahub != 'undefined') {
@@ -177,7 +177,7 @@ class ForceDirectedGraph {
     }
 
     function onMouseout(d) {
-        if (!d.selected && self.selectedCounter > 0)
+        if (!d.selected && self.selected.length > 0)
           d3.select(this).style('opacity', .5);
 
         if (self.datahub != null && typeof self.datahub != 'undefined') {
@@ -186,21 +186,28 @@ class ForceDirectedGraph {
     }
 
     function onClick(d) {
-        if (d.selected) self.selectedCounter -= 1;
-        else self.selectedCounter += 1;
-
         d.selected = !d.selected;
+        self.selected = [];
+        for (let i = 0 ; i < self.nodesData.length ; i++) {
+            let node = self.nodesData[i];
+            if (node.id == d.id) {
+                node.selected = d.selected;
+            }
+            if (node.selected) {
+                self.selected.push(node);
+            }
+        }
 
-        if (d.selected && self.selectedCounter == 1) {
+        if (d.selected && self.selected.length == 1) {
           self.getNodes()
-            .filter(function (n) { return !n.selected; })
+            .filter((n)  => { return !n.selected; })
             .style('opacity', .5);
-        } else if (self.selectedCounter <= 0) {
+        } else if (self.selected.length == 0) {
             self.getNodes().style('opacity', null);
         }
 
         if (self.datahub != null && typeof self.datahub != 'undefined') {
-          self.datahub.notifyMouseclick(d, self);
+            self.datahub.notifySelected(self.selected, self);
         }
     }
 
@@ -226,7 +233,7 @@ class ForceDirectedGraph {
         .attr('fill', (d) => self.nodeFill(d));
     }
 
-    if (self.selectedCounter > 0)
+    if (self.selected.length > 0)
       nodes
         .filter((d) => { return !d.selected; })
         .style('opacity', '.3');
@@ -315,9 +322,11 @@ class ForceDirectedGraph {
 
   nodeFill(d) {
     if (typeof d.hsl != 'undefined') {
-      return d.hsl; //d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
+      return d.hsl;
     } else if (typeof d.fill != 'undefined' && d.fill >= 0) {
       return d3.hsl(d.fill, 1, 0.5);
+    } else if (typeof d.group != 'undefined' && d.group >= 0) {
+      return this.cat10(d.group);
     } else {
       return null;
     }
@@ -327,7 +336,7 @@ class ForceDirectedGraph {
     if (typeof d.stroke != 'undefined') {
       return d.stroke;
     } else if (typeof d.group != 'undefined' && d.group >= 0) {
-      return this.cat10(d.group);
+      return null;// this.cat10(d.group);
     } else {
       return null;
     }
@@ -437,11 +446,10 @@ class ForceDirectedGraph {
   listenSelected(selectedElems, caller) {
     let self = this;
     let nodes = self.getNodes();
-    let data = selectedElems.data();
     let selectedNodes = nodes
       .filter(function(d) {
-        for (let i = 0 ; i < data.length ; i++)
-          if (data[i].id == d.id)
+        for (let i = 0 ; i < selectedElems.length ; i++)
+          if (selectedElems[i].id == d.id)
             return true;
 
         return false;
