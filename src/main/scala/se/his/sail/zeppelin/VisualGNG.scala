@@ -57,7 +57,27 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val fdg = ForceDirectedGraph(dataHub)
 
-  def getSelectedNodes: String = this.dataHub.get
+  /**
+    * Returns the id of the user-selected nodes.
+    * */
+  def getSelected: Array[Int] = {
+    this.dataHub.get
+      .tail.replace("]", "")
+      .split(",")
+      .map(_.toInt)
+  }
+
+  /**
+    * Assigns a group name to selected nodes.
+    * */
+  def groupSelected(groupName: String): Unit = {
+    this.getSelected.foreach(i => {
+      this.model.nodes(i).group = Some(groupName)
+      this.model.nodes(i).label = Some(groupName)
+    })
+
+    this.updateGraph()
+  }
 
 
   // ------------- process variables -------------

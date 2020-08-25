@@ -19,6 +19,7 @@ class Node( val id: Int,
   def this(id: Int, prototype: br.DenseVector[Double]) = this(id, prototype, 0, 0, 0)
 
   var label: Option[String] = None
+  var group: Option[String] = None
   var certainty: Double = 0
 
   def setLabel(label: String): this.type = {
@@ -62,7 +63,7 @@ class GNGModel private () extends Serializable {
 
   var nextUnitId: Int = -1
   var inputCol: String = "features"
-  var outputCol: String = "prediction"
+  var outputCol: String = "gng"
 
   def setInputCol(col: String): GNGModel = {
     this.inputCol = col
@@ -89,7 +90,7 @@ class GNGModel private () extends Serializable {
       udf((col: SparkVector) => {
         val vec = br.DenseVector(col.toArray)
         nodes.zipWithIndex
-          .map{ case (n, i) => Prediction(i, n.distanceTo(vec)) }
+          .map{ case (n, i) => Prediction(i, n.distanceTo(vec), n.group.orNull, n.label.orNull) }
           .minBy(_.distance)
       })
     } else {
@@ -106,7 +107,7 @@ class GNGModel private () extends Serializable {
 }
 
 case object GNGModel {
-  case class Prediction (unitId: Int, distance: Double)
+  case class Prediction (unitId: Int, distance: Double, group: String, label: String)
 
   def apply(rdd: RDD[br.DenseVector[Double]]): GNGModel = {
     val samples = rdd.takeSample(false, 2)
