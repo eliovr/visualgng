@@ -44,11 +44,11 @@ val gng = VisualGNG(df)
 The `display` method will display the visual elements as an output of the current notebook paragraph, and return a VisualGNG object. By default, VisualGNG assumes that all columns in the dataset will be used in training.
 
 ### Parameters
-A few options are available before deploying (calling `display`) VisualGNG:
-- `setInputCols(columns: Array[String])`: defines which columns to be used during training.
-- `setLabelCol(column: String)`: sets a given column as a label. This means that the column is ignored during training. It takes a string with the name of the column/attribute. The values in the column can be of type Int, Double or String.  
-- `setIdCol(column: String)`: Similar to `setLabelCol`. If `setInputCols` is given, then all other columns, expect this one, will be used for training. The method takes a string with the column/attribute name. The values in the column can be of any type.
-- `setScale`: takes a boolean. Defines whether the training attributes should be scaled to a unit standard deviation or not.
+A few options are available before deploying (calling `display`):
+- `setInputCols(columns: Array[String])`: defines which columns to be used for training.
+- `setLabelCol(column: String)`: sets a given column as a label, which means that the column is ignored in training. The values in the column can be of type Int, Double or String.  
+- `setIdCol(column: String)`: Similar to `setLabelCol`. If `setInputCols` is given, then all other columns, expect this one, will be used for training. The values in the column can be of any type.
+- `setScale(scale: Boolean)`: takes a boolean. Defines whether the training attributes should be scaled to a unit standard deviation or not.
 
 
 ### VisualGNG object
