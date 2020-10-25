@@ -11,13 +11,14 @@ class ForceDirectedGraph {
     this.height = params.height || 600;
 
     this.selected = [];
-    this.cat10 = d3.scale.category20()//.domain(d3.range(10));
+    this.cat20 = d3.scale.category20().domain(d3.range(20));
 
     this.withImages = params.withImages || false;
     this.displayHint = true;
 
     this.minNodeRadius = 5;
     this.maxNodeRadius = 15;
+    this.strokeWidth = 2.5;
 
     this.defaultLinkDistance = 30;
     this.minLinkDistance = 0;
@@ -110,7 +111,7 @@ class ForceDirectedGraph {
     this.canvas.append('g')
       .attr('class', 'nodes')
       .attr('stroke', 'white')
-      .attr('stroke-width', 1.5)
+      .attr('stroke-width', this.strokeWidth)
       .attr('fill', 'gray');
 
     this.svg.call(d3.behavior.zoom()
@@ -326,7 +327,7 @@ class ForceDirectedGraph {
     } else if (typeof d.fill != 'undefined' && d.fill >= 0) {
       return d3.hsl(d.fill, 1, 0.5);
     } else if (typeof d.group != 'undefined' && d.group >= 0) {
-      return this.cat10(d.group);
+      return this.cat20(d.group);
     } else {
       return null;
     }
@@ -335,8 +336,8 @@ class ForceDirectedGraph {
   nodeStroke(d) {
     if (typeof d.stroke != 'undefined') {
       return d.stroke;
-    } else if (typeof d.group != 'undefined' && d.group >= 0) {
-      return null;// this.cat10(d.group);
+    } else if (typeof d.group != 'undefined' && typeof d.hsl != 'undefined') {
+      return this.cat20(d.group);
     } else {
       return null;
     }

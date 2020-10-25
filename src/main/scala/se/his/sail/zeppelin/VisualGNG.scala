@@ -57,29 +57,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private val fdg = ForceDirectedGraph(dataHub)
 
-  /**
-    * Returns the id of the user-selected nodes.
-    * */
-  def getSelected: Array[Int] = {
-    this.dataHub.get
-      .tail.replace("]", "")
-      .split(",")
-      .map(_.toInt)
-  }
-
-  /**
-    * Assigns a group name to selected nodes.
-    * */
-  def groupSelected(groupName: String): Unit = {
-    this.getSelected.foreach(i => {
-      this.model.nodes(i).group = Some(groupName)
-      this.model.nodes(i).label = Some(groupName)
-    })
-
-    this.updateGraph()
-  }
-
-
   // ------------- process variables -------------
 
   /**
@@ -359,7 +336,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .as[(SparkVector, SparkVector)]
         .first()
 
-      this.features = FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, .1 +: max.toArray)
+      this.features = this.labelCol match {
+        case Some(_) => FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, 1.0 +: max.toArray)
+        case None => FeaturesSummary(featureNames, min.toArray, max.toArray)
+      }
       this.fdg.setFeatures(this.features)
       this.pc.setFeatures(this.features)
     }
@@ -482,12 +462,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.rdd.persist()
 
     try {
-//      val arr = this.rdd.collect()
       while (this.isTraining) {
         val time = Utils.performance {
           /** Optimizer (O). */
           this.model = gng.fit(rdd, this.model)
-//          this.model = gng.fitSequential(arr, this.model)
         }
 
         accTime += time
@@ -515,6 +493,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         statusText.set("This was... unexpected: " + e.getMessage)
         logger.error("VisualGNG ERROR: ", e)
     }
+
+    this.rdd.unpersist();
   }
 
   /**
@@ -561,7 +541,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       .setAttr("nodes", JSONArray(nodes))
       .setAttr("links", JSONArray(edges))
 
-    dataHub.put(data.toString)
+    dataHub.push(data.toString)
   }
 
 
@@ -573,6 +553,13 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   /**
     * Returns a DataFrame with each data point assigned to its closest unit.
+    *
+    * @param updateGraph if true (computationally expensive), updates the GNG graph, i.e., sets the size of the nodes based
+    *                    on the number of data points each represents; if the data has labels, it assigns a label to each
+    *                    node based on a majority vote (which is then painted in the graph); if the data has IDs, it adds
+    *                    the ID as a label of the closest to each node (which is then shown as a hint).
+    *
+    * @return the original dataset with an appended column:
     * */
   def transform(updateGraph: Boolean = false): Dataset[_] = {
     val predictions = this.model.transform(df, withDistance = true)
@@ -584,40 +571,42 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
       import org.apache.spark.sql.expressions.Window
       import spark.implicits._
 
-      val stats: Array[(Int, Long, Double, String)] = if (this.labelCol.nonEmpty) {
-        predictions.groupBy(unitIdCol)
-          .agg(collect_list(labelCol.get))
-          .map{
-            case Row(unitId: Int, labels: Seq[_]) =>
-              val groupedLabels = labels.groupBy(identity)
-              val certainty = 1 / groupedLabels.size.toDouble
-              val label = groupedLabels.maxBy(_._2.size)._1
-              (unitId, labels.size.toLong, certainty, label.toString)
-          }
-          .collect()
-      } else if (this.idCol.nonEmpty) {
-        val w = Window.partitionBy(unitIdCol)
-        val idCol = this.idCol.get
-        predictions
-          .select(
-            col(unitIdCol),
-            col(distanceCol),
-            col(idCol),
-            count(col(idCol)).over(w).as("counts"),
-            min(distanceCol).over(w).as("min_distance")
-          )
-          .where(s"$distanceCol = min_distance")
-          .map{
-            case Row(unitId: Int, _, rowId: String, counts: Long, _) =>
-              (unitId, counts, .0, rowId)
-          }
-          .collect()
-      } else {
-        predictions
-          .groupBy(unitIdCol)
-          .count()
-          .map(row => (row.getInt(0), row.getLong(1), .0, ""))
-          .collect()
+      val stats: Array[(Int, Long, Double, String)] = (this.labelCol, this.idCol) match {
+        case (Some(labelCol), _) =>
+          predictions.groupBy(unitIdCol)
+            .agg(collect_list(labelCol))
+            .map{
+              case Row(unitId: Int, labels: Seq[_]) =>
+                val groupedLabels = labels.groupBy(identity)
+                val certainty = 1 / groupedLabels.size.toDouble
+                val label = groupedLabels.maxBy(_._2.size)._1
+                (unitId, labels.size.toLong, certainty, label.toString)
+            }
+            .collect()
+
+        case (_, Some(idCol)) =>
+          val w = Window.partitionBy(unitIdCol)
+          predictions
+            .select(
+              col(unitIdCol),
+              col(distanceCol),
+              col(idCol),
+              count(col(idCol)).over(w).as("counts"),
+              min(distanceCol).over(w).as("min_distance")
+            )
+            .where(s"$distanceCol = min_distance")
+            .map{
+              case Row(unitId: Int, _, rowId: String, counts: Long, _) =>
+                (unitId, counts, .0, rowId)
+            }
+            .collect()
+
+        case _ =>
+          predictions
+            .groupBy(unitIdCol)
+            .count()
+            .map(row => (row.getInt(0), row.getLong(1), .0, ""))
+            .collect()
       }
 
       this.model.nodes.zipWithIndex.foreach{ case (n, i) =>
@@ -628,6 +617,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
               n.setLabel(label)
               n.certainty = certainty
             }
+
           case None =>
             n.winCounter = 0
         }
@@ -675,6 +665,35 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
     updateGraph()
     kmModel
+  }
+
+  /**
+    * Returns the id of the user-selected nodes.
+    * */
+  def getSelected: Array[Int] = {
+    this.dataHub.get
+      .tail.replace("]", "")
+      .split(",")
+      .map(_.toInt)
+  }
+
+  /**
+    * Assigns a group name to selected nodes.
+    * */
+  def groupSelected(groupName: String): Unit = {
+    this.getSelected.foreach(i => {
+      this.model.nodes(i).group = Some(groupName)
+      this.model.nodes(i).label = Some(groupName)
+    })
+
+    this.updateGraph()
+  }
+
+  /**
+    * Saves the current prototype vectors as images.
+    * */
+  def saveAsImages(imgWidth: Int, imgHeight: Int, channels: Int, folder: String): Unit = {
+    this.model.saveAsImages(imgWidth, imgHeight, channels, folder)
   }
 
 }

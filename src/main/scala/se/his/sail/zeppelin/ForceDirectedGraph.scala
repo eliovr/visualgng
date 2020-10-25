@@ -44,7 +44,7 @@ class ForceDirectedGraph private (val id: String, val dataHub: DataHub) {
     val jsonEdges = edges.mkString("[", ",", "]")
     val data = s"""{"nodes": $jsonNodes, "links": $jsonEdges}"""
 
-    dataHub.put(data)
+    dataHub.push(data)
     this
   }
 }

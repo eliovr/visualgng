@@ -1,5 +1,6 @@
 package se.his.sail.common
 
+import java.awt.Color
 import java.awt.image.BufferedImage
 
 import breeze.linalg._
@@ -77,19 +78,34 @@ object Utils {
     }
   }
 
-  def createImage(pixels: Matrix[Int], saveTo: String, format: String = "png"): Unit = {
-    val h = pixels.rows
-    val w = pixels.cols
-    val imgType = BufferedImage.TYPE_BYTE_GRAY
+  def createImage(matrix: Matrix[Int], channels: Int, saveToFile: String, format: String = "png"): Unit = {
+    val h = matrix.rows
+    val w = matrix.cols / channels
+
+    val imgType = channels match {
+      case 1 => BufferedImage.TYPE_BYTE_GRAY
+      case 3 => BufferedImage.TYPE_INT_RGB
+      case 4 => BufferedImage.TYPE_INT_ARGB
+    }
+
     val image = new BufferedImage(w, h, imgType)
 
     for (y <- 0 until h) {
       for (x <- 0 until w) {
-        image.setRGB(x, y, pixels(x, y))
+        val xx = x * channels
+        val values = matrix(y, xx until (xx+channels)).t.toArray
+        val pixel = values match {
+          case Array(p) =>
+            val c = 255 - p
+            new Color(c, c, c).getRGB
+          case Array(r, g, b) => new Color(r, g, b).getRGB
+          case Array(r, g, b, a) => new Color(r, g, b).getRGB
+        }
+        image.setRGB(y, x, pixel)
       }
     }
 
-    javax.imageio.ImageIO.write(image, format, new java.io.File(saveTo))
+    javax.imageio.ImageIO.write(image, format, new java.io.File(saveToFile))
   }
 }
 

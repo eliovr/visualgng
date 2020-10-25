@@ -5,18 +5,23 @@ import AngularElem._
 import se.his.sail.common.Utils
 
 class DataHub private (val id: String) {
+
   private val inputBucketId = s"${id}_input_bucket"
+
   private val inputBucket =
     <div id={inputBucketId} style="display:none;">
       {{{{{inputBucketId}}}}}
     </div>.model(inputBucketId, "")
+
   this.inputBucket.display()
 
   private val outputBucketId = s"${id}_output_bucket"
+
   private val outputBucket =
     <div id={outputBucketId} style="display:none;">
       {{{{{outputBucketId}}}}}
     </div>.model(outputBucketId, "")
+
   this.outputBucket.display()
 
   private val script: ScriptText = {
@@ -32,7 +37,7 @@ class DataHub private (val id: String) {
     <script>{ script }</script>
   </div>.display()
 
-  def put(jsonData: String): this.type = {
+  def push(jsonData: String): this.type = {
     this.inputBucket.model(this.inputBucketId, jsonData)
     this
   }
@@ -41,6 +46,7 @@ class DataHub private (val id: String) {
     AngularModel(outputBucketId)().asInstanceOf[String]
   }
 }
+
 
 object DataHub {
   private var idCounter: Int = -1

@@ -381,7 +381,7 @@ case object GNG {
   }
 
   def isTwoDimensional(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
-    def bridgesBetween(x: Node, y: Node, links: ArrayBuffer[Edge]): Array[Node] = {
+    def bridgesBetween(x: Node, y: Node, links: ArrayBuffer[Edge]): List[Node] = {
       val xNeighbors: mutable.Set[Node] = mutable.Set.empty
       val yNeighbors: mutable.Set[Node] = mutable.Set.empty
 
@@ -390,22 +390,23 @@ case object GNG {
         else if (e.connects(y)) yNeighbors.add(e.getPartnerOf(y))
       }
 
-      xNeighbors.intersect(yNeighbors).toArray
+      xNeighbors.intersect(yNeighbors).toList
     }
 
     val bridges = bridgesBetween(a, b, edges)
-    var blockingEdges = false
 
-    if (bridges.length == 1) {
-      val closeEdges = edges.filter(e => e.connects(bridges(0)) || e.connects(a) || e.connects(b) )
-      blockingEdges =
-        bridgesBetween(bridges.head, b, closeEdges).length > 1 ||
-        bridgesBetween(bridges.head, a, closeEdges).length > 1
-    } else if (bridges.length == 2) {
-      blockingEdges = edges.exists(_.connects(bridges(0), bridges(1)))
+    bridges match {
+      // one common neighbor
+      case bn :: Nil =>
+        val closeEdges = edges.filter(e => e.connects(bn) || e.connects(a) || e.connects(b) )
+        bridgesBetween(bn, b, closeEdges).length < 2 && bridgesBetween(bn, a, closeEdges).length < 2
+
+      // two common neighbors
+      case bn1 :: bn2 :: Nil =>
+        !edges.exists(_.connects(bn1, bn2))
+
+      case _ => false
     }
-
-    bridges.nonEmpty && bridges.length <= 2 && !blockingEdges
   }
 
   def existsPath(a: Node, b: Node, edges: ArrayBuffer[Edge]): Boolean = {
@@ -418,14 +419,19 @@ case object GNG {
 
       if (!exists) {
         val nextEdges: ArrayBuffer[Edge] = ArrayBuffer.empty
+        val iterator = openEdges.iterator
         val head = openNodes.dequeue()
-        openEdges.foreach(e => {
+
+        while (iterator.hasNext && !exists) {
+          val e = iterator.next()
           if (e.connects(head)) {
             openNodes.enqueue(e.getPartnerOf(head))
+            exists = e.connects(b)
           } else {
             nextEdges.append(e)
           }
-        })
+        }
+
         openEdges = nextEdges
       }
     }
@@ -436,23 +442,24 @@ case object GNG {
   def networkSizeCompare(a: Node, edges: ArrayBuffer[Edge], n: Int): Boolean = {
     val openNodes: mutable.Queue[Node] = mutable.Queue(a)
     var openEdges: ArrayBuffer[Edge] = edges
-    var count = 0
+    var count = 1
 
     while (openEdges.nonEmpty && openNodes.nonEmpty && count <= n) {
-      count += openEdges.count(_.connects(openNodes.front))
+      val nextEdges: ArrayBuffer[Edge] = ArrayBuffer.empty
+      val iterator = openEdges.iterator
+      val head = openNodes.dequeue()
 
-      if (count <= n) {
-        val nextEdges: ArrayBuffer[Edge] = ArrayBuffer.empty
-        val head = openNodes.dequeue()
-        openEdges.foreach(e => {
-          if (e.connects(head)) {
-            openNodes.enqueue(e.getPartnerOf(head))
-          } else {
-            nextEdges.append(e)
-          }
-        })
-        openEdges = nextEdges
+      while (iterator.hasNext && count <= n) {
+        val e = iterator.next()
+        if (e.connects(head)) {
+          openNodes.enqueue(e.getPartnerOf(head))
+          count += 1
+        } else {
+          nextEdges.append(e)
+        }
       }
+      
+      openEdges = nextEdges
     }
 
     count <= n

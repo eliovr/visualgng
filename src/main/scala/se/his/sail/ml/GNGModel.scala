@@ -8,6 +8,10 @@ import org.apache.spark.sql.functions.udf
 import se.his.sail.ml.GNGModel.Prediction
 
 import scala.collection.mutable.ArrayBuffer
+import java.awt.image.BufferedImage
+import java.awt.Color
+
+import se.his.sail.common.Utils
 
 class Node( val id: Int,
             val prototype: br.DenseVector[Double],
@@ -104,6 +108,17 @@ class GNGModel private () extends Serializable {
 
     ds.withColumn(outputCol, classify(ds(inputCol)))
   }
+
+  def saveAsImages(imgWidth: Int, imgHeight: Int, channels: Int, folder: String): Unit = {
+    nodes.zipWithIndex.foreach{ case (u, i) =>
+      val w = imgWidth * channels
+      val h = imgHeight
+      //    val pixels = br.convert(u.prototype.asDenseMatrix.reshape(h, w) * 255.0, Int)
+      val pixels = br.convert(u.prototype.asDenseMatrix.reshape(h, w), Int)
+      Utils.createImage(pixels, channels, s"$folder/$i.png")
+    }
+  }
+
 }
 
 case object GNGModel {
