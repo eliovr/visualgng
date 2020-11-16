@@ -152,6 +152,7 @@ class DataHub {
           self.notifyUpdate(data);
         } catch (e) {
           console.log(e);
+          console.log(newVal);
         }
       }
     });

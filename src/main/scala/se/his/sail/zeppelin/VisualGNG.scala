@@ -1,5 +1,7 @@
 package se.his.sail.zeppelin
 
+import java.io.{File, PrintWriter}
+
 import breeze.{linalg => br}
 import org.apache.spark.ml.clustering.{KMeans, KMeansModel}
 import org.apache.spark.ml.feature.{StandardScaler, VectorAssembler}
@@ -38,11 +40,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   private var rdd: RDD[br.DenseVector[Double]] = spark.sparkContext.emptyRDD
 
-  /**
-    * Names of the features used in training. This may vary depending on the previous three.
-    * */
-  private var features: FeaturesSummary = _
-
   private val gng = new GNG()
     .setIterations(1)
 
@@ -50,6 +47,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   // ---------------- Frontend plots' interfaces ------------
+
+  var maxDisplayFeatures: Int = 700
+  /**
+    * Names of the features used in training. This may vary depending on the previous three.
+    * */
+  private var features: FeaturesSummary = _
 
   private val dataHub = DataHub()
 
@@ -327,21 +330,23 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         case Row(f: SparkVector) => new br.DenseVector(f.toArray)
       }
 
-      logger.info("Computing feature stats.")
+      if (inputCols.lengthCompare(this.maxDisplayFeatures) <= 0) {
+        logger.info("Computing feature stats.")
 
-      val (min, max): (SparkVector, SparkVector) = df.select(
-        Summarizer.metrics("min", "max")
-          .summary(df(this.inputCol)).as("summary"))
-        .select("summary.min", "summary.max")
-        .as[(SparkVector, SparkVector)]
-        .first()
+        val (min, max): (SparkVector, SparkVector) = df.select(
+          Summarizer.metrics("min", "max")
+            .summary(df(this.inputCol)).as("summary"))
+          .select("summary.min", "summary.max")
+          .as[(SparkVector, SparkVector)]
+          .first()
 
-      this.features = this.labelCol match {
-        case Some(_) => FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, 1.0 +: max.toArray)
-        case None => FeaturesSummary(featureNames, min.toArray, max.toArray)
+        this.features = this.labelCol match {
+          case Some(_) => FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, 1.0 +: max.toArray)
+          case None => FeaturesSummary(featureNames, min.toArray, max.toArray)
+        }
+        this.fdg.setFeatures(this.features)
+        this.pc.setFeatures(this.features)
       }
-      this.fdg.setFeatures(this.features)
-      this.pc.setFeatures(this.features)
     }
     catch {
       case e: Throwable =>
@@ -512,6 +517,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   private def updateGraph(): Unit = {
+    dataHub.push(this.toJSONString)
+  }
+
+
+  def toJSONString: String = {
     val labels: mutable.Map[String, Int] = mutable.Map.empty
 
     val nodes: Iterable[JSONObject] = this.model.nodes.zipWithIndex.map{case (n, i) =>
@@ -519,14 +529,15 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .setAttr("id", n.id)
         .setAttr("trueId", i)
         .setAttr("density", n.winCounter)
-        .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
 
       n.label match {
         case Some(x) =>
           obj
             .setAttr("hint", x.toString)
             .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
-        case None => obj
+            .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
+        case None =>
+          obj.setAttr("data", JSONArray(n.prototype.toArray))
       }
     }
 
@@ -537,11 +548,10 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
         .setAttr("distance", e.distance)
     }
 
-    val data: JSONObject = JSONObject()
+    JSONObject()
       .setAttr("nodes", JSONArray(nodes))
       .setAttr("links", JSONArray(edges))
-
-    dataHub.push(data.toString)
+      .toString
   }
 
 
@@ -694,6 +704,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     * */
   def saveAsImages(imgWidth: Int, imgHeight: Int, channels: Int, folder: String): Unit = {
     this.model.saveAsImages(imgWidth, imgHeight, channels, folder)
+  }
+
+  def saveAsJSON(file: String): Unit = {
+    val pw = new PrintWriter(new File(file ))
+    pw.write(this.toJSONString)
+    pw.close()
   }
 
 }

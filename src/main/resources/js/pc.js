@@ -18,7 +18,17 @@ class ParallelCoordinates {
     this.axis_width = 0;      // width of each axis (might vary based on boxplot_width).
     this.boxplot_width = 6;   // width of each box-plot.
     this.boxplot_margin = 1;
-    this.cat10 = d3.scale.category10().domain(d3.range(10));
+    // this.cat10 = d3.scale.category10().domain(d3.range(10));
+    let colors = ['#66c2a5','#fc8d62','#8da0cb','#e78ac3','#a6d854','#ffd92f',
+      '#e5c494','#b3b3b3', '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
+      '#ffff33','#a65628','#f781bf', '#666666'];
+    this.cat20 = (i) => {
+      let c = i;
+      while (c >= colors.length) {
+        c - colors.length;
+      }
+      return colors[c];
+    }
     this.paint_boxplots = false;
     this.hasClusters = false;
 
@@ -127,7 +137,7 @@ class ParallelCoordinates {
     if (self.isFiltered(d)) return 'lightgray';
 
     if (typeof d.group != 'undefined' && d.group >= 0)
-      return self.cat10(d.group);
+      return self.cat20(d.group);
     else if (typeof d.hsl != 'undefined' && d.hsl != null)
       return d.hsl;
         // return d3.hsl(d.hsl[0], d.hsl[1], d.hsl[2]);
@@ -342,7 +352,7 @@ class ParallelCoordinates {
       .attr('y', (d) => { return d.feature.scale(d.q3); })
       .attr('width', self.boxplot_width)
       .attr('height', (d) => { return d.feature.scale(d.q1) - d.feature.scale(d.q3); })
-      .attr('fill', (d) => { return self.cat10(d.id); })
+      .attr('fill', (d) => { return self.cat20(d.id); })
       .style(self.boxplot_box_style);
 
     // ----------- Medians --------

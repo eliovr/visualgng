@@ -4,6 +4,7 @@ class ForceDirectedGraph {
     this.datahub = null;
     this.nodesData = [];
     this.linksData = [];
+    this.features = features || [];
 
     let params = custom_params || {};
 
@@ -11,7 +12,17 @@ class ForceDirectedGraph {
     this.height = params.height || 600;
 
     this.selected = [];
-    this.cat20 = d3.scale.category20().domain(d3.range(20));
+    // this.cat20 = d3.scale.category20().domain(d3.range(20));
+    let colors = ['#66c2a5','#fc8d62','#8da0cb','#e78ac3','#a6d854','#ffd92f',
+      '#e5c494','#b3b3b3', '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
+      '#ffff33','#a65628','#f781bf', '#666666'];
+    this.cat20 = (i) => {
+      let c = i;
+      while (c >= colors.length) {
+        c - colors.length;
+      }
+      return colors[c];
+    }
 
     this.withImages = params.withImages || false;
     this.displayHint = true;
@@ -71,10 +82,10 @@ class ForceDirectedGraph {
         })
 
     // -- Color by select.
-    if (!this.withImages) {
+    if (!this.withImages && this.features != []) {
       let options = [{'name': '-- Select --'}];
-      for (var i = 0; i < features.length; i++) {
-        options.push(features[i]);
+      for (var i = 0; i < this.features.length; i++) {
+        options.push(this.features[i]);
       }
 
       let select = this.controls.append('li')

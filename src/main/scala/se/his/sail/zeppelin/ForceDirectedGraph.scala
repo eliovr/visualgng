@@ -9,10 +9,10 @@ import scala.xml.Elem
 
 class ForceDirectedGraph private (val id: String, val dataHub: DataHub) {
 
-  private var features: FeaturesSummary = _
+  private var features: Option[FeaturesSummary] = None
 
   def setFeatures(features: FeaturesSummary): this.type = {
-    this.features = features
+    this.features = Some(features)
     this
   }
 
@@ -20,11 +20,14 @@ class ForceDirectedGraph private (val id: String, val dataHub: DataHub) {
     * The HTML force directed graph element.
     * */
   lazy val elem: Elem = {
-    require(this.features != null, "Feature cannot be null")
+    val featuresJSON = this.features match {
+      case Some(f) => f.toJSON
+      case None => "[]"
+    }
 
     val script = new ScriptText(
       s"""
-         |var $id = new ForceDirectedGraph('$id', ${this.features.toJSON});
+         |var $id = new ForceDirectedGraph('$id', $featuresJSON);
          |$id.listen(${dataHub.id});
          |${dataHub.id}.notify($id);
          |""".stripMargin)
