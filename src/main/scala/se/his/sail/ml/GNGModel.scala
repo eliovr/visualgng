@@ -8,10 +8,11 @@ import org.apache.spark.sql.functions.udf
 import se.his.sail.ml.GNGModel.Prediction
 
 import scala.collection.mutable.ArrayBuffer
-import java.awt.image.BufferedImage
-import java.awt.Color
+import java.io._
 
-import se.his.sail.common.Utils
+import se.his.sail.common.{JSONArray, JSONObject, Utils}
+
+import scala.collection.mutable
 
 class Node( val id: Int,
             val prototype: br.DenseVector[Double],
@@ -109,6 +110,75 @@ class GNGModel private () extends Serializable {
     ds.withColumn(outputCol, classify(ds(inputCol)))
   }
 
+  def toJSONString: String = {
+    val labels: mutable.Map[String, Int] = mutable.Map.empty
+
+    val nodes: Iterable[JSONObject] = this.nodes.zipWithIndex.map{case (n, i) =>
+      val obj = JSONObject()
+        .setAttr("id", n.id)
+        .setAttr("trueId", i)
+        .setAttr("density", n.winCounter)
+
+      n.label match {
+        case Some(x) =>
+          obj
+            .setAttr("hint", s"$i: $x")
+            .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
+            .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
+        case None =>
+          obj
+            .setAttr("hint", s"$i")
+            .setAttr("data", JSONArray(n.prototype.toArray))
+      }
+    }
+
+    val edges: Iterable[JSONObject] = this.edges.map{e =>
+      JSONObject()
+        .setAttr("source", this.nodes.indexWhere(_.id == e.source.id))
+        .setAttr("target", this.nodes.indexWhere(_.id == e.target.id))
+        .setAttr("distance", e.distance)
+    }
+
+    JSONObject()
+      .setAttr("nodes", JSONArray(nodes))
+      .setAttr("links", JSONArray(edges))
+      .toString
+  }
+
+  def toGMLString: String = {
+    val nodes: Iterable[String] = this.nodes.zipWithIndex.map{case (n, i) =>
+        s"""
+         |node
+         |[
+         | id $i
+         | label "$i"
+         | density ${n.winCounter}
+         | group ${n.label.getOrElse(0)}
+         |]
+         |""".stripMargin
+    }
+
+    val edges : Iterable[String] = this.edges.map{e =>
+      s"""
+         |edge
+         |[
+         | source ${this.nodes.indexWhere(_.id == e.source.id)}
+         | target ${this.nodes.indexWhere(_.id == e.target.id)}
+         | distance ${e.distance}
+         |]
+         |""".stripMargin
+    }
+
+    s"""
+       |graph
+       |[
+       | ${nodes.mkString("")}
+       | ${edges.mkString("")}
+       |]
+       |""".stripMargin
+  }
+
+
   def saveAsImages(imgWidth: Int, imgHeight: Int, channels: Int, folder: String): Unit = {
     nodes.zipWithIndex.foreach{ case (u, i) =>
       val w = imgWidth * channels
@@ -119,7 +189,41 @@ class GNGModel private () extends Serializable {
     }
   }
 
+  /**
+    * Saves the model as JSON. This includes the prototypes.
+    * @param filePath full path and file name (including extension).
+    * */
+  def saveAsJSON(filePath: String): Unit = {
+    val pw = new PrintWriter(new File(filePath))
+    pw.write(this.toJSONString)
+    pw.close()
+  }
+
+  /**
+    * Saves the model as GML (Graph Modeling Language).
+    * @param filePath full path and file name (including extension).
+    * */
+  def saveAsGML(filePath: String): Unit = {
+    val pw = new PrintWriter(new File(filePath))
+    pw.write(this.toGMLString)
+    pw.close()
+  }
+
+  /**
+    * Saves prototypes as CSV.
+    * @param filePath full path and file name (including extension).
+    * */
+  def savePrototypes(filePath: String): Unit = {
+    val prototypes: String = this.nodes
+      .map(_.prototype.toArray.mkString(", "))
+      .mkString("\n")
+
+    val pw = new PrintWriter(new File(filePath))
+    pw.write(prototypes)
+    pw.close()
+  }
 }
+
 
 case object GNGModel {
   case class Prediction (unitId: Int, distance: Double, group: String, label: String)

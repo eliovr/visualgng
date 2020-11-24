@@ -21,11 +21,10 @@ class GNG private (
                     var k: Double,
                     var moving: Boolean, // whether it should model a moving distribution
                     var untangle: Boolean, // constraints the creation of edges
-                    var sampleSignals: Double, // fraction of the total amount of signals to be sampled during training.
                     var minNetSize: Int // minimum size (i.e., number of units) of a network.
                      ) {
 
-  def this() = this(50, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 1, 3)
+  def this() = this(50, 100, 100, .2, .006, 50, .5, .995, 0, false, true, 3)
 
   var inputCol = "features"
 
@@ -89,11 +88,6 @@ class GNG private (
     this
   }
 
-  def setSampleSignals(fraction: Double): this.type = {
-    this.sampleSignals = fraction
-    this
-  }
-
   def setMinNetSize(minNetSize: Int): this.type = {
     this.minNetSize = minNetSize
     this
@@ -111,7 +105,6 @@ class GNG private (
   def isMoving: Boolean = this.moving
   def isUntangle: Boolean  = this.untangle
   def getInputCol: String = this.inputCol
-  def getSampleSignals: Double = this.sampleSignals
   def getMinNetSize: Int = this.minNetSize
 
 
@@ -138,7 +131,7 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, sampleSignals, minNetSize) _
+      moving, untangle, minNetSize) _
 
     val reduceFit = GNG.fit(
       lambda,
@@ -146,7 +139,7 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, 1, minNetSize) _
+      moving, untangle, minNetSize) _
 
     var finalModel = model
 
@@ -175,7 +168,7 @@ class GNG private (
       eps_b, eps_n,
       maxAge,
       alpha, d, k,
-      moving, untangle, sampleSignals, minNetSize) _
+      moving, untangle, minNetSize) _
 
     var finalModel = model
 
@@ -198,23 +191,16 @@ case object GNG {
           k: Double,
           moving: Boolean,
           untangle: Boolean,
-          sampleSignals: Double,
           minNetSize: Int
          )(model: GNGModel, inputSignals: Seq[br.DenseVector[Double]]): GNGModel = {
 
     var units = model.nodes
     var edges = model.edges
-    val totalSignals = inputSignals.size
     val signalIterator = inputSignals.iterator
     var signalCounter = 0
-    val maxSignals: Int = if (sampleSignals >= 1) 0 else (sampleSignals * totalSignals).toInt
 
-    while((maxSignals <= 0 && signalIterator.hasNext) || (maxSignals > 0 && signalCounter < maxSignals)) {
-      val signal = if (maxSignals > 0) {
-        inputSignals(Random.nextInt(totalSignals))
-      } else {
-        signalIterator.next()
-      }
+    while (signalIterator.hasNext) {
+      val signal = signalIterator.next()
       signalCounter += 1
 
     /**

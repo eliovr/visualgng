@@ -1,7 +1,5 @@
 package se.his.sail.zeppelin
 
-import java.io.{File, PrintWriter}
-
 import breeze.{linalg => br}
 import org.apache.spark.ml.clustering.{KMeans, KMeansModel}
 import org.apache.spark.ml.feature.{StandardScaler, VectorAssembler}
@@ -13,9 +11,8 @@ import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.apache.zeppelin.display.angular.notebookscope.AngularElem._
 import org.slf4j.LoggerFactory
 import se.his.sail.ml._
-import se.his.sail.common.{FeaturesSummary, JSONArray, JSONObject, Utils}
+import se.his.sail.common.{FeaturesSummary, Utils}
 
-import scala.collection.mutable
 
 /**
   * A Visual Analytics library for the Growning Neural Gas (GNG) algorithm (Fritzke)
@@ -87,6 +84,8 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
   private var scaleValues =  false
 
   private var isImages = false
+
+  private var sampleSize = 1.0
 
   /**
     * Sets the features (DataFrame columns) to be used in GNG training (as used by VectorAssembler).
@@ -171,7 +170,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     .setMin(1)
     .setStep(5)
 
-  private val maxSignalsInput: InputNumber = new InputNumber(this.gng.sampleSignals)
+  private val maxSignalsInput: InputNumber = new InputNumber(this.sampleSize)
     .setHint("Fraction of the total amount of signals to be sampled during training (1 == all)")
     .setMin(.0)
     .setMax(1)
@@ -258,8 +257,9 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
   this.applyButton.setOnClickListener(() => {
     this.maxEpochs = this.maxEpochsInput.get.toInt
+    this.sampleSize = this.maxSignalsInput.get
     this.gng
-      .setSampleSignals(this.maxSignalsInput.get)
+//      .setSampleSignals(this.maxSignalsInput.get)
       .setMaxNodes(this.maxNodesInput.get.toInt)
       .setMaxAge(this.maxAgeInput.get.toInt)
       .setLambda(this.lambdaInput.get.toInt)
@@ -468,9 +468,12 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
     try {
       while (this.isTraining) {
+        /** Sampler (S). */
+        val sample = this.rdd.sample(true, this.sampleSize)
+
         val time = Utils.performance {
           /** Optimizer (O). */
-          this.model = gng.fit(rdd, this.model)
+          this.model = gng.fit(sample, this.model)
         }
 
         accTime += time
@@ -517,41 +520,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   private def updateGraph(): Unit = {
-    dataHub.push(this.toJSONString)
-  }
-
-
-  def toJSONString: String = {
-    val labels: mutable.Map[String, Int] = mutable.Map.empty
-
-    val nodes: Iterable[JSONObject] = this.model.nodes.zipWithIndex.map{case (n, i) =>
-      val obj = JSONObject()
-        .setAttr("id", n.id)
-        .setAttr("trueId", i)
-        .setAttr("density", n.winCounter)
-
-      n.label match {
-        case Some(x) =>
-          obj
-            .setAttr("hint", x.toString)
-            .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
-            .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
-        case None =>
-          obj.setAttr("data", JSONArray(n.prototype.toArray))
-      }
-    }
-
-    val edges: Iterable[JSONObject] = this.model.edges.map{e =>
-      JSONObject()
-        .setAttr("source", this.model.nodes.indexWhere(_.id == e.source.id))
-        .setAttr("target", this.model.nodes.indexWhere(_.id == e.target.id))
-        .setAttr("distance", e.distance)
-    }
-
-    JSONObject()
-      .setAttr("nodes", JSONArray(nodes))
-      .setAttr("links", JSONArray(edges))
-      .toString
+    dataHub.push(this.model.toJSONString)
   }
 
 
@@ -706,11 +675,11 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.model.saveAsImages(imgWidth, imgHeight, channels, folder)
   }
 
-  def saveAsJSON(file: String): Unit = {
-    val pw = new PrintWriter(new File(file ))
-    pw.write(this.toJSONString)
-    pw.close()
-  }
+  def saveAsJSON(file: String): Unit = this.model.saveAsJSON(file)
+
+  def saveAsGML(file: String): Unit = this.model.saveAsGML(file)
+
+  def savePrototypes(file: String): Unit = this.model.savePrototypes(file)
 
 }
 
