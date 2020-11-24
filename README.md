@@ -61,6 +61,30 @@ The instantiated VisualGNG object (`gng`) has a few methods and attributes that 
 - `transform(updateGraph=false)`: returns a new Dataset with the original data and two new columns, the vectors used in training, and a struct with four values: `unitID` (ID of the closest unit to the data point), `distance` (Euclidean distance from the point to the unit), `group` (in case you gave a group of units a name using `groupSelected`), and `label` (same as group).
 - `model`: returns the `GNGModel` instance. This can be used as a transformer (in the SparkML sense) on new data.
 
+#### Exporting results
+
+The `gng` object and the model (`gng.model`), have three methods to export the trained model:
+
+- `saveAsJSON(filePath: String)`: saves the model as a JSON string of the form
+    ```json
+    {
+      "nodes": [{
+        "id": "Int - unique unit id used during training",
+        "trueId": "Int - unit id (indexed from 0 to nodes size)",
+        "density": "Double - count of data points represented by the unit",
+        "hint": "String - unit id + label (from calling groupSelected)",
+        "group": "Int - group id (from calling groupSelected)",
+        "data": "Array[Double] - unit's prototype (vector)"
+      }],
+      "links": [{
+        "source": "Int - trueId of the source node",
+        "target": "Int - trueId of the target node",
+        "distance": "Double - Euclidean distance between source and target prototypes"
+      }]
+    }
+    ```
+- `saveAsGML(filePath: String)`: saves the model in [GML format](https://gephi.org/users/supported-graph-formats/gml-format/) (which does not include prototypes).
+- `savePrototypes(filePath: String)`: saves units' prototypes as CSV.
 
 ## Reference
 ```
