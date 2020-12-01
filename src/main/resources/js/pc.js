@@ -19,13 +19,14 @@ class ParallelCoordinates {
     this.boxplot_width = 6;   // width of each box-plot.
     this.boxplot_margin = 1;
     // this.cat10 = d3.scale.category10().domain(d3.range(10));
+    // this.cat20 = d3.scale.category20().domain(d3.range(20));
     let colors = ['#66c2a5','#fc8d62','#8da0cb','#e78ac3','#a6d854','#ffd92f',
       '#e5c494','#b3b3b3', '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
       '#ffff33','#a65628','#f781bf', '#666666'];
     this.cat20 = (i) => {
       let c = i;
       while (c >= colors.length) {
-        c - colors.length;
+        c -= colors.length;
       }
       return colors[c];
     }

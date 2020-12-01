@@ -126,7 +126,7 @@ class GNGModel private () extends Serializable {
       n.label match {
         case Some(x) =>
           obj
-            .setAttr("hint", s"$i: $x")
+            .setAttr("hint", s"$x")
             .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
 
         case None =>

@@ -19,7 +19,7 @@ class ForceDirectedGraph {
     this.cat20 = (i) => {
       let c = i;
       while (c >= colors.length) {
-        c - colors.length;
+        c -= colors.length;
       }
       return colors[c];
     }

@@ -525,7 +525,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   private def updateGraph(): Unit = {
-    dataHub.push(this.model.toJSONString(this.features.count < this.maxDisplayFeatures))
+    dataHub.push(this.model.toJSONString(this.features != null))
   }
 
 
