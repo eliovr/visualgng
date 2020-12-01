@@ -447,31 +447,33 @@ class ParallelCoordinates {
   }
 
   listenMouseover(elem, caller) {
-    let lines = this.getSeries();
+    let series = this.getSeries();
 
-    lines
-      .filter(function(d){ return !d.selected; })
+    series
+      .filter((d) => { return !d.selected; })
       .attr('stroke-width', null)
       .attr('stroke-opacity', .25);
 
-    lines
-      .filter(function(d){ return d.id === elem.id; })
+    series
+      .filter((d) => { return d.id === elem.id; })
       .attr('stroke', (d) => this.getStroke(d))
       .attr('stroke-width', 3)
       .attr('stroke-opacity', 1);
   }
 
   listenMouseout(elem, caller) {
-    if (caller.selectedCounter <= 0) {
-      this.getSeries()
+    let series = this.getSeries();
+    let existsSelected = series.data().some(d => d.selected);
+
+    if (existsSelected) {
+      series.filter((d) => { return !d.selected; })
+        .attr('stroke-width', null)
+        .attr('stroke-opacity', .25);
+    } else {
+      series
         .attr('stroke', (d) => this.getStroke(d))
         .attr('stroke-width', null)
         .attr('stroke-opacity', null);
-    } else {
-      this.getSeries()
-        .filter((d) => { return !d.selected; })
-        .attr('stroke-width', null)
-        .attr('stroke-opacity', .25);
     }
   }
 }

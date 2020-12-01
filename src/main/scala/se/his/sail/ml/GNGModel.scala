@@ -110,7 +110,7 @@ class GNGModel private () extends Serializable {
     ds.withColumn(outputCol, classify(ds(inputCol)))
   }
 
-  def toJSONString: String = {
+  def toJSONString(withPrototypes: Boolean = true): String = {
     val labels: mutable.Map[String, Int] = mutable.Map.empty
 
     val nodes: Iterable[JSONObject] = this.nodes.zipWithIndex.map{case (n, i) =>
@@ -119,16 +119,18 @@ class GNGModel private () extends Serializable {
         .setAttr("trueId", i)
         .setAttr("density", n.winCounter)
 
+      if (withPrototypes) {
+        obj.setAttr("data", JSONArray(n.prototype.toArray))
+      }
+
       n.label match {
         case Some(x) =>
           obj
             .setAttr("hint", s"$i: $x")
             .setAttr("group", labels.getOrElseUpdate(x.toString, labels.size))
-            .setAttr("data", JSONArray(n.certainty +: n.prototype.toArray))
+
         case None =>
-          obj
-            .setAttr("hint", s"$i")
-            .setAttr("data", JSONArray(n.prototype.toArray))
+          obj.setAttr("hint", s"$i")
       }
     }
 
@@ -195,7 +197,7 @@ class GNGModel private () extends Serializable {
     * */
   def saveAsJSON(filePath: String): Unit = {
     val pw = new PrintWriter(new File(filePath))
-    pw.write(this.toJSONString)
+    pw.write(this.toJSONString())
     pw.close()
   }
 
@@ -248,5 +250,3 @@ case object GNGModel {
     model
   }
 }
-
-

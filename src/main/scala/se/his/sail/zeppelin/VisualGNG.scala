@@ -137,7 +137,16 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this
   }
 
-
+  /**
+    * Sets the maximum number of features (data attributes) to display in the views (e.g., in the PC plot).
+    * This is used in order to limit the burden on the views in the cases of high-dimensional data (e.g., images).
+    * A summary of features is sent to the frontend, if there are too many features, then the browser can lag.
+    * Default value 700.
+    * */
+  def setMaxDisplayFeatures(n: Int): this.type = {
+    this.maxDisplayFeatures = n
+    this
+  }
 
   /**
     * DataFrame column where the feature vectors are found.
@@ -259,7 +268,6 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
     this.maxEpochs = this.maxEpochsInput.get.toInt
     this.sampleSize = this.maxSignalsInput.get
     this.gng
-//      .setSampleSignals(this.maxSignalsInput.get)
       .setMaxNodes(this.maxNodesInput.get.toInt)
       .setMaxAge(this.maxAgeInput.get.toInt)
       .setLambda(this.lambdaInput.get.toInt)
@@ -340,10 +348,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
           .as[(SparkVector, SparkVector)]
           .first()
 
-        this.features = this.labelCol match {
-          case Some(_) => FeaturesSummary("certainty" +: featureNames, .0 +: min.toArray, 1.0 +: max.toArray)
-          case None => FeaturesSummary(featureNames, min.toArray, max.toArray)
-        }
+        this.features = FeaturesSummary(featureNames, min.toArray, max.toArray)
         this.fdg.setFeatures(this.features)
         this.pc.setFeatures(this.features)
       }
@@ -520,7 +525,7 @@ class VisualGNG private (val id: Int, private var df: DataFrame) {
 
 
   private def updateGraph(): Unit = {
-    dataHub.push(this.model.toJSONString)
+    dataHub.push(this.model.toJSONString(this.features.count < this.maxDisplayFeatures))
   }
 
 

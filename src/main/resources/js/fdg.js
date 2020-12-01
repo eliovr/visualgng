@@ -456,19 +456,16 @@ class ForceDirectedGraph {
   }
 
   listenSelected(selectedElems, caller) {
-    let self = this;
-    let nodes = self.getNodes();
-    let selectedNodes = nodes
-      .filter(function(d) {
-        for (let i = 0 ; i < selectedElems.length ; i++)
-          if (selectedElems[i].id == d.id)
-            return true;
+    let nodes = this.getNodes();
+    let nodesData = nodes.data();
 
-        return false;
-      });
-
-    nodes.style('opacity', .3);
-    selectedNodes.style('opacity', 1);
+    if (nodesData.length > selectedElems.length) {
+      nodes.style('opacity', d => selectedElems.some(e => e.id === d.id) ? 1 : .3 );
+    } else if (nodesData.some(d => d.selected)) {
+      nodes.style('opacity', d => d.selected ? 1 : .3 );
+    } else {
+      nodes.style('opacity', 1);
+    }
   }
 
   listen(hub) {
