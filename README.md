@@ -1,9 +1,5 @@
 # VisualGNG
-An updated implementation of the Visual Growing Neural Gas for exploratory data analysis, as describe in  [Ventocilla et al., 2019](https://www.scitepress.org/PublicationsDetail.aspx?ID=la6GQgbV48M=&t=1).
-
-
-## Author
-- Elio Ventocilla
+An updated implementation of the Visual Growing Neural Gas for exploratory data analysis, as describe in  [Ventocilla et al., 2019](https://www.scitepress.org/PublicationsDetail.aspx?ID=la6GQgbV48M=&t=1). The original version discussed in that paper is found [here](https://github.com/eliovr/visualgng/releases/tag/v1.1).
 
 
 ## Requirements
@@ -18,10 +14,14 @@ An updated implementation of the Visual Growing Neural Gas for exploratory data 
 
 ## Installation
 Start by building and packaging the project using [SBT](https://www.scala-sbt.org/).
+```bash
+cd path/to/visualgng && sbt package
 ```
-sbt package
-```
-Add a reference to the generated jar file to the Spark interpreter in the Zeppelin web interface. To do so, go to Interpreter -> Spark -> edit. Add a new dependency artifact with the path to the generated jar file (e.g. /path/to/visualgng/target/visualgng-1.0-SNAPSHOT.jar). Once the dependency is added, it should be possible to import the needed packages from a notebook.
+Add a reference to the generated jar file (found in `../visualgng/target/scala-2.11`) to the Spark interpreter via the Zeppelin web interface.
+
+![Adding dependency to Spark interpreter](img/interpreter-dependency.gif)
+
+Once the dependency is added it is possible to import the needed packages from a notebook.
 
 
 ## Usage
@@ -85,6 +85,9 @@ The `gng` object and the model (`gng.model`), have three methods to export the t
     ```
 - `saveAsGML(filePath: String)`: saves the model in [GML format](https://gephi.org/users/supported-graph-formats/gml-format/) (which does not include prototypes).
 - `savePrototypes(filePath: String)`: saves units' prototypes as CSV.
+
+## Author
+- Elio Ventocilla
 
 ## Reference
 ```
