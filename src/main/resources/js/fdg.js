@@ -12,17 +12,7 @@ class ForceDirectedGraph {
     this.height = params.height || 600;
 
     this.selected = [];
-    // this.cat20 = d3.scale.category20().domain(d3.range(20));
-    let colors = ['#66c2a5','#fc8d62','#8da0cb','#e78ac3','#a6d854','#ffd92f',
-      '#e5c494','#b3b3b3', '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
-      '#ffff33','#a65628','#f781bf', '#666666'];
-    this.cat20 = (i) => {
-      let c = i;
-      while (c >= colors.length) {
-        c -= colors.length;
-      }
-      return colors[c];
-    }
+    this.cat20 = d3.scale.category20().domain(d3.range(20));
 
     this.withImages = params.withImages || false;
     this.displayHint = true;
@@ -93,15 +83,16 @@ class ForceDirectedGraph {
         .text('Color by: ')
         .append('select')
           .attr('onclick', 'event.stopPropagation();')
+          .on('change', () => {
+            let i = d3.select(d3.event.target).property('value');
+            this.datahub.setSelectedFeature(i-1);
+          })
           .selectAll('option')
           .data(options);
 
       select.enter().append('option')
         .attr('value', (d, i) => { return i; })
         .text((d) => { return d.name; })
-        .on('click', (d, i) => {
-          this.datahub.setSelectedFeature(i-1);
-        });
     }
 
     // --------------- Canvas
