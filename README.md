@@ -17,7 +17,7 @@ Start by building and packaging the project using [SBT](https://www.scala-sbt.or
 ```bash
 cd path/to/visualgng && sbt package
 ```
-Add a reference to the generated jar file (found in `../visualgng/target/scala-2.11`) to the Spark interpreter via the Zeppelin web interface.
+Add a reference to the generated jar file (`../visualgng/target/scala-2.11/visualgng_2.11-1.2.jar`) to the Spark interpreter via the Zeppelin web interface.
 
 ![Adding dependency to Spark interpreter](img/interpreter-dependency.gif)
 
@@ -45,20 +45,20 @@ The `display` method will display the visual elements as an output of the curren
 
 ### Parameters
 A few options are available before deploying (calling `display`):
-- `setInputCols(columns: Array[String])`: defines which columns to be used for training.
-- `setLabelCol(column: String)`: sets a given column as a label, which means that the column is ignored in training. The values in the column can be of type Int, Double or String.  
-- `setIdCol(column: String)`: Similar to `setLabelCol`. If `setInputCols` is given, then all other columns, expect this one, will be used for training. The values in the column can be of any type.
-- `setScale(scale: Boolean)`: takes a boolean. Defines whether the training attributes should be scaled to a unit standard deviation or not.
+- `.setInputCols(columns: Array[String])`: defines which columns to be used for training.
+- `.setLabelCol(column: String)`: sets a given column as a label, which means that the column is ignored in training. The values in the column can be of type Int, Double or String. This lets VisualGNG know which attribute to use when assigning labels to units (see the `transform` method below). 
+- `.setIdCol(column: String)`: Similar to `setLabelCol`. If `setInputCols` is given, then all other columns, expect this one, will be used for training. The values in the column can be of any type.
+- `.setScale(scale: Boolean)`: takes a boolean. Defines whether the training attributes should be scaled to a unit standard deviation or not.
 
 
 ### VisualGNG object
-The instantiated VisualGNG object (`gng`) has a few methods and attributes that can be used in other paragraphs of the notebook:
+The instantiated VisualGNG object (`gng` in the previous example) has a few methods and attributes that can be used in other paragraphs of the notebook:
 
-- `parallelCoodinates()`: will display a parallel coordinates plot with the values of each prototype vector in the GNG model. This plot dynamically updates along with the GNG's force-directed graph.
-- `kmeans(k: Int)`: takes a number for k as an integer and returns a `KMeansModel`. Will run K-means on the trained units and visually encode the result in the force-directed graph.
-- `getSelected`: returns the ids (as `Array[Int]`) of the selected nodes/units (i.e., selected in the graph).
-- `groupSelected(name: String)`: assigns a name to the group selected nodes.
-- `transform(updateGraph=false)`: returns a new Dataset with the original data and two new columns, the vectors used in training, and a struct with four values: `unitID` (ID of the closest unit to the data point), `distance` (Euclidean distance from the point to the unit), `group` (in case you gave a group of units a name using `groupSelected`), and `label` (same as group).
+- `gng.parallelCoordinates()`: will display a parallel coordinates plot with the values of each prototype vector in the GNG model. This plot dynamically updates along with the GNG's force-directed graph.
+- `gng.transform(updateGraph=false)`: returns a new Dataset with the original data and two new columns: the vectors used during training, and a struct with four values: `unitID` (ID of the closest unit to the data point), `distance` (Euclidean distance from the point to the unit), `group` (in case you gave a group of units a name using `groupSelected`), and `label` (same as group). If `updateGraph=true`, then VisualGNG updates the graph with the true density (resizes nodes based on the number of data points each unit represents) and class (colors nodes based on the majority class given by the attributed defined in `setLabelCol`).
+- `gng.kmeans(k: Int)`: takes a number for k as an integer and returns a `KMeansModel`. Will run K-means on the trained units and visually encode the result in the force-directed graph.
+- `gng.getSelected`: returns the ids (as `Array[Int]`) of the selected nodes/units (i.e., selected in the graph).
+- `gng.groupSelected(name: String)`: assigns a name to the group selected nodes.
 - `model`: returns the `GNGModel` instance. This can be used as a transformer (in the SparkML sense) on new data.
 
 #### Exporting results
