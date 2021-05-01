@@ -84,7 +84,7 @@ class ForceDirectedGraph {
         .append('select')
           .attr('onclick', 'event.stopPropagation();')
           .on('change', () => {
-            let i = d3.select(d3.event.target).property('value');
+            let i = d3.event.target.value;
             this.datahub.setSelectedFeature(i-1);
           })
           .selectAll('option')

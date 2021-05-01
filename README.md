@@ -17,7 +17,7 @@ Start by building and packaging the project using [SBT](https://www.scala-sbt.or
 ```bash
 cd path/to/visualgng && sbt package
 ```
-Add a reference to the generated jar file (`../visualgng/target/scala-2.11/visualgng_2.11-1.2.jar`) to the Spark interpreter via the Zeppelin web interface.
+Add a reference to the generated jar file (`/path/to/visualgng/target/scala-2.11/visualgng_2.11-1.2.jar`) to the Spark interpreter via the Zeppelin web interface.
 
 ![Adding dependency to Spark interpreter](img/interpreter-dependency.gif)
 
@@ -59,13 +59,13 @@ The instantiated VisualGNG object (`gng` in the previous example) has a few meth
 - `gng.kmeans(k: Int)`: takes a number for k as an integer and returns a `KMeansModel`. Will run K-means on the trained units and visually encode the result in the force-directed graph.
 - `gng.getSelected`: returns the ids (as `Array[Int]`) of the selected nodes/units (i.e., selected in the graph).
 - `gng.groupSelected(name: String)`: assigns a name to the group selected nodes.
-- `model`: returns the `GNGModel` instance. This can be used as a transformer (in the SparkML sense) on new data.
+- `gng.model`: returns the `GNGModel` instance. This can be used as a transformer (in the SparkML sense) on new data.
 
 #### Exporting results
 
 The `gng` object and the model (`gng.model`), have three methods to export the trained model:
 
-- `saveAsJSON(filePath: String)`: saves the model as a JSON string of the form
+- `gng.saveAsJSON(filePath: String)`: saves the model as a JSON string of the form
     ```json
     {
       "nodes": [{
@@ -83,8 +83,8 @@ The `gng` object and the model (`gng.model`), have three methods to export the t
       }]
     }
     ```
-- `saveAsGML(filePath: String)`: saves the model in [GML format](https://gephi.org/users/supported-graph-formats/gml-format/) (which does not include prototypes).
-- `savePrototypes(filePath: String)`: saves units' prototypes as CSV.
+- `gng.saveAsGML(filePath: String)`: saves the model in [GML format](https://gephi.org/users/supported-graph-formats/gml-format/) (which does not include prototypes).
+- `gng.savePrototypes(filePath: String)`: saves units' prototypes as CSV.
 
 ## Author
 - Elio Ventocilla
